@@ -1,0 +1,217 @@
+{
+  "name": "02 - Inbound Form AI Qualifier",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "inbound-form",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-form",
+      "name": "Form webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://company.clearbit.com/v2/companies/find?domain={{ $json.body.email.split('@')[1] }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "ignoreResponseCode": true,
+          "timeout": 8000
+        }
+      },
+      "id": "enrich",
+      "name": "Enrich domain (optional)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME_CLEARBIT",
+          "name": "Clearbit Header"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-sonnet-4-6",
+          "mode": "list"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a sales qualifier for SkynetLabs (automation + AEO agency).\n\nMY ICP:\n- Agencies / SaaS / clinics / e-com brands\n- $500K-$10M ARR\n- Has a real budget for an automation or AEO project ($1K+)\n\nNOT ICP:\n- Personal email + no company info\n- Students, job seekers, recruiters\n- 'How much do you charge for a logo' tier\n- Crypto / MLM / pitch from another agency\n\nForm data:\n{{ JSON.stringify($('Form webhook').item.json.body) }}\n\nEnrichment (may be empty):\n{{ JSON.stringify($json) }}\n\nReturn ONLY valid JSON:\n{\n  \"qual_score\": 0-100,\n  \"tier\": \"hot|warm|cold|reject\",\n  \"reason\": \"one-sentence why\",\n  \"suggested_reply\": \"80-word reply matching their context, or 'SKIP' if reject\",\n  \"crm_tags\": [\"agency\", \"saas\", \"clinic\", \"ecom\", \"other\"],\n  \"budget_band\": \"unknown|<1k|1-5k|5-15k|15k+\"\n}",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.2,
+          "maxTokens": 700
+        }
+      },
+      "id": "claude-qual",
+      "name": "Claude qualify",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1.2,
+      "position": [640, 300],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_ME_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.content?.[0]?.text || $input.first().json.text || '';\nconst match = raw.match(/\\{[\\s\\S]*\\}/);\nif (!match) throw new Error('No JSON in Claude reply');\nconst parsed = JSON.parse(match[0]);\nconst form = $('Form webhook').first().json.body;\nreturn [{\n  json: {\n    ...parsed,\n    name: form.name,\n    email: form.email,\n    company: form.company || '',\n    message: form.message || '',\n    submitted_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "parse",
+      "name": "Parse + merge",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict"},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.tier }}",
+              "rightValue": "reject",
+              "operator": {"type": "string", "operation": "notEquals"}
+            }
+          ]
+        }
+      },
+      "id": "if-not-reject",
+      "name": "If not reject",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1080, 300]
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "upsert",
+        "additionalFields": {
+          "email": "={{ $json.email }}",
+          "firstname": "={{ $json.name.split(' ')[0] }}",
+          "lastname": "={{ $json.name.split(' ').slice(1).join(' ') }}",
+          "company": "={{ $json.company }}"
+        }
+      },
+      "id": "crm-upsert",
+      "name": "CRM upsert + tag",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2.1,
+      "position": [1300, 200],
+      "credentials": {
+        "hubspotOAuth2Api": {
+          "id": "REPLACE_ME_HUBSPOT",
+          "name": "HubSpot OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "#inbound-leads",
+        "text": "=📨 *{{ $json.tier.toUpperCase() }} LEAD* — score {{ $json.qual_score }}/100\n\n*{{ $json.name }}* — {{ $json.company }}\n{{ $json.email }}\n\n*Their message:*\n> {{ $json.message }}\n\n*Why:* {{ $json.reason }}\n*Budget band:* {{ $json.budget_band }}\n\n*Suggested reply:*\n```\n{{ $json.suggested_reply }}\n```",
+        "otherOptions": {}
+      },
+      "id": "slack-alert",
+      "name": "Slack alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1300, 400],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_ME_SLACK",
+          "name": "Slack OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_ME_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "inbound-log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "submitted_at": "={{ $json.submitted_at }}",
+            "name": "={{ $json.name }}",
+            "email": "={{ $json.email }}",
+            "company": "={{ $json.company }}",
+            "qual_score": "={{ $json.qual_score }}",
+            "tier": "={{ $json.tier }}",
+            "reason": "={{ $json.reason }}",
+            "budget_band": "={{ $json.budget_band }}",
+            "message": "={{ $json.message }}",
+            "tags": "={{ $json.crm_tags.join(',') }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheets-log",
+      "name": "Log all to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1520, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME_GSHEETS",
+          "name": "Google Sheets OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"ok\": true, \"tier\": \"{{ $('Parse + merge').item.json.tier }}\" }",
+        "options": {}
+      },
+      "id": "respond",
+      "name": "Respond to form",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1740, 300]
+    }
+  ],
+  "connections": {
+    "Form webhook": {"main": [[{"node": "Enrich domain (optional)", "type": "main", "index": 0}]]},
+    "Enrich domain (optional)": {"main": [[{"node": "Claude qualify", "type": "main", "index": 0}]]},
+    "Claude qualify": {"main": [[{"node": "Parse + merge", "type": "main", "index": 0}]]},
+    "Parse + merge": {"main": [[{"node": "If not reject", "type": "main", "index": 0}]]},
+    "If not reject": {
+      "main": [
+        [{"node": "CRM upsert + tag", "type": "main", "index": 0}, {"node": "Slack alert", "type": "main", "index": 0}, {"node": "Log all to Sheet", "type": "main", "index": 0}],
+        [{"node": "Log all to Sheet", "type": "main", "index": 0}]
+      ]
+    },
+    "CRM upsert + tag": {"main": [[{"node": "Respond to form", "type": "main", "index": 0}]]},
+    "Log all to Sheet": {"main": [[{"node": "Respond to form", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"},
+  "meta": {
+    "templateId": "skynetlabs-02",
+    "instanceId": "REPLACE_ME"
+  },
+  "tags": [{"name": "skynetlabs-pack"}, {"name": "lead-gen"}, {"name": "form-qualifier"}]
+}

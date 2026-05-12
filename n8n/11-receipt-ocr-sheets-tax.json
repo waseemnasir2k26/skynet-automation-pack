@@ -1,0 +1,235 @@
+{
+  "name": "11 - Receipt OCR to Sheets to Tax",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "to:(receipts+ocr@gmail.com) has:attachment newer_than:1d"
+        },
+        "options": {
+          "downloadAttachments": true
+        }
+      },
+      "id": "trigger-gmail",
+      "name": "Gmail receipts inbox",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_ME_GMAIL",
+          "name": "Gmail OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = [];\nfor (const item of $input.all()) {\n  const atts = item.binary || {};\n  for (const key of Object.keys(atts)) {\n    const att = atts[key];\n    if (!att.mimeType || !/image|pdf/i.test(att.mimeType)) continue;\n    out.push({\n      json: {\n        message_id: item.json.id,\n        from: item.json.from?.value?.[0]?.address || item.json.from,\n        subject: item.json.subject,\n        received_at: item.json.date,\n        attachment_name: att.fileName,\n        mime_type: att.mimeType\n      },\n      binary: { data: att }\n    });\n  }\n}\nreturn out;"
+      },
+      "id": "extract-attachments",
+      "name": "Extract image attachments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "name": "={{ $now.format('yyyy-MM-dd-HHmmss') }}-{{ $json.attachment_name }}",
+        "driveId": {
+          "__rl": true,
+          "value": "My Drive",
+          "mode": "list"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "REPLACE_ME_DRIVE_FOLDER",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "drive-archive",
+      "name": "Archive to Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [640, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_ME_GDRIVE",
+          "name": "Google Drive OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-sonnet-4-6",
+          "mode": "list"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a bookkeeping OCR. Read the attached receipt image and return ONLY valid JSON. No prose.\n\nFields:\n{\n  \"date\": \"YYYY-MM-DD or empty\",\n  \"vendor\": \"merchant name\",\n  \"total\": \"number, no currency symbol\",\n  \"currency\": \"USD|EUR|GBP|PKR|other ISO\",\n  \"vat\": \"number or 0\",\n  \"category\": \"software|meals|travel|office|advertising|professional_services|utilities|hardware|other\",\n  \"payment_method\": \"card last4 or 'cash' or 'unknown'\",\n  \"confidence\": 0-100,\n  \"notes\": \"anything weird or unclear\"\n}\n\nIf confidence < 60, set category to 'other' and add a note. Never invent numbers.",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.1,
+          "maxTokens": 600,
+          "includeImages": true
+        }
+      },
+      "id": "claude-ocr",
+      "name": "Claude vision OCR",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1.2,
+      "position": [860, 300],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_ME_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.content?.[0]?.text || $input.first().json.text || '';\nconst match = raw.match(/\\{[\\s\\S]*\\}/);\nif (!match) {\n  return [{ json: { error: 'no_json', raw, ...$('Extract image attachments').first().json } }];\n}\nlet parsed;\ntry { parsed = JSON.parse(match[0]); }\ncatch (e) { return [{ json: { error: 'bad_json', raw, ...$('Extract image attachments').first().json } }]; }\nconst meta = $('Extract image attachments').first().json;\nconst drive = $('Archive to Drive').first().json;\nreturn [{\n  json: {\n    ...parsed,\n    raw_url: drive.webViewLink || '',\n    source_email: meta.from,\n    received_at: meta.received_at,\n    attachment_name: meta.attachment_name,\n    processed_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "parse-ocr",
+      "name": "Parse + enrich",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1080, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty"
+              }
+            }
+          ]
+        }
+      },
+      "id": "if-clean",
+      "name": "If parse OK",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1300, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_ME_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "ledger",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ $json.date }}",
+            "vendor": "={{ $json.vendor }}",
+            "total": "={{ $json.total }}",
+            "currency": "={{ $json.currency }}",
+            "vat": "={{ $json.vat }}",
+            "category": "={{ $json.category }}",
+            "payment_method": "={{ $json.payment_method }}",
+            "raw_url": "={{ $json.raw_url }}",
+            "notes": "={{ $json.notes }} (conf {{ $json.confidence }})"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheets-ledger",
+      "name": "Append to ledger",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1520, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME_GSHEETS",
+          "name": "Google Sheets OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_ME_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "errors",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "received_at": "={{ $json.received_at }}",
+            "attachment_name": "={{ $json.attachment_name }}",
+            "error": "={{ $json.error }}",
+            "raw": "={{ $json.raw }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheets-errors",
+      "name": "Log error",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1520, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME_GSHEETS",
+          "name": "Google Sheets OAuth"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Gmail receipts inbox": { "main": [[{ "node": "Extract image attachments", "type": "main", "index": 0 }]] },
+    "Extract image attachments": { "main": [[{ "node": "Archive to Drive", "type": "main", "index": 0 }]] },
+    "Archive to Drive": { "main": [[{ "node": "Claude vision OCR", "type": "main", "index": 0 }]] },
+    "Claude vision OCR": { "main": [[{ "node": "Parse + enrich", "type": "main", "index": 0 }]] },
+    "Parse + enrich": { "main": [[{ "node": "If parse OK", "type": "main", "index": 0 }]] },
+    "If parse OK": {
+      "main": [
+        [{ "node": "Append to ledger", "type": "main", "index": 0 }],
+        [{ "node": "Log error", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "templateId": "skynetlabs-11",
+    "instanceId": "REPLACE_ME"
+  },
+  "tags": [{"name": "skynetlabs-pack"}, {"name": "ocr"}, {"name": "bookkeeping"}]
+}

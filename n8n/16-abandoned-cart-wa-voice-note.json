@@ -1,0 +1,190 @@
+{
+  "name": "16 - Abandoned Cart WA Voice Note",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "shopify-cart-abandon",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-cart",
+      "name": "Shopify cart webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "typeValidation": "strict"},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.body.phone || $json.body.shipping_address?.phone }}",
+              "rightValue": "",
+              "operator": {"type": "string", "operation": "notEmpty"}
+            },
+            {
+              "leftValue": "={{ $json.body.total_price }}",
+              "rightValue": "20",
+              "operator": {"type": "number", "operation": "gte"}
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-phone",
+      "name": "Has phone + AOV >= $20",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "amount": 12,
+        "unit": "minutes"
+      },
+      "id": "wait-12m",
+      "name": "Wait 12 min",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [640, 300],
+      "webhookId": "wait-cart-abandon"
+    },
+    {
+      "parameters": {
+        "url": "=https://{{ $env.SHOPIFY_STORE }}.myshopify.com/admin/api/2024-04/checkouts/{{ $('Shopify cart webhook').first().json.body.id }}.json",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "check-recovered",
+      "name": "Recheck cart status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 300],
+      "credentials": {
+        "httpHeaderAuth": {"id": "REPLACE_ME_SHOPIFY", "name": "Shopify Admin Token"}
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "typeValidation": "strict"},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.checkout?.completed_at }}",
+              "rightValue": "",
+              "operator": {"type": "string", "operation": "empty"}
+            }
+          ]
+        }
+      },
+      "id": "if-still-abandoned",
+      "name": "Still abandoned?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1080, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.elevenlabs.io/v1/text-to-speech/REPLACE_ME_VOICE_ID",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"Hey {{ $('Shopify cart webhook').first().json.body.shipping_address?.first_name || 'there' }}, this is Waseem from the store. I saw you were looking at the {{ $('Shopify cart webhook').first().json.body.line_items[0].title }}. If you had any questions, hit me back on this WhatsApp — happy to help. Talk soon.\",\n  \"model_id\": \"eleven_turbo_v2_5\",\n  \"voice_settings\": {\"stability\": 0.5, \"similarity_boost\": 0.75}\n}",
+        "options": {"response": {"response": {"responseFormat": "file"}}}
+      },
+      "id": "elevenlabs-tts",
+      "name": "ElevenLabs voice synth",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1300, 300],
+      "credentials": {
+        "httpHeaderAuth": {"id": "REPLACE_ME_ELEVENLABS", "name": "ElevenLabs API"}
+      }
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "bucketName": "REPLACE_ME_S3_BUCKET",
+        "fileName": "=voice-notes/cart-{{ $('Shopify cart webhook').first().json.body.id }}-{{ $now.toMillis() }}.mp3",
+        "binaryPropertyName": "data",
+        "additionalFields": {"acl": "publicRead", "contentType": "audio/mpeg"}
+      },
+      "id": "s3-upload",
+      "name": "Upload to S3",
+      "type": "n8n-nodes-base.awsS3",
+      "typeVersion": 2,
+      "position": [1520, 300],
+      "credentials": {
+        "aws": {"id": "REPLACE_ME_AWS", "name": "AWS Credentials"}
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "from": "whatsapp:REPLACE_ME_TWILIO_FROM",
+        "to": "=whatsapp:{{ $('Shopify cart webhook').first().json.body.phone || $('Shopify cart webhook').first().json.body.shipping_address.phone }}",
+        "toWhatsapp": true,
+        "message": "=Voice note from the founder about your cart 👇",
+        "options": {
+          "mediaUrl": ["=https://REPLACE_ME_S3_BUCKET.s3.amazonaws.com/{{ $('Upload to S3').first().json.Key }}"]
+        }
+      },
+      "id": "twilio-wa",
+      "name": "Send WA voice note",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [1740, 300],
+      "credentials": {
+        "twilioApi": {"id": "REPLACE_ME_TWILIO", "name": "Twilio API"}
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {"__rl": true, "value": "REPLACE_ME_SHEET_ID", "mode": "id"},
+        "sheetName": {"__rl": true, "value": "cart_abandon_log", "mode": "name"},
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ts": "={{ $now.toISO() }}",
+            "customer_phone": "={{ $('Shopify cart webhook').first().json.body.phone || $('Shopify cart webhook').first().json.body.shipping_address.phone }}",
+            "customer_name": "={{ $('Shopify cart webhook').first().json.body.shipping_address?.first_name }}",
+            "product_title": "={{ $('Shopify cart webhook').first().json.body.line_items[0].title }}",
+            "cart_value": "={{ $('Shopify cart webhook').first().json.body.total_price }}",
+            "audio_url": "=https://REPLACE_ME_S3_BUCKET.s3.amazonaws.com/{{ $('Upload to S3').first().json.Key }}",
+            "wa_sid": "={{ $json.sid }}",
+            "status": "sent"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheet-log",
+      "name": "Log to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1960, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "REPLACE_ME_GSHEETS", "name": "Google Sheets OAuth"}
+      }
+    }
+  ],
+  "connections": {
+    "Shopify cart webhook": {"main": [[{"node": "Has phone + AOV >= $20", "type": "main", "index": 0}]]},
+    "Has phone + AOV >= $20": {"main": [[{"node": "Wait 12 min", "type": "main", "index": 0}], []]},
+    "Wait 12 min": {"main": [[{"node": "Recheck cart status", "type": "main", "index": 0}]]},
+    "Recheck cart status": {"main": [[{"node": "Still abandoned?", "type": "main", "index": 0}]]},
+    "Still abandoned?": {"main": [[{"node": "ElevenLabs voice synth", "type": "main", "index": 0}], []]},
+    "ElevenLabs voice synth": {"main": [[{"node": "Upload to S3", "type": "main", "index": 0}]]},
+    "Upload to S3": {"main": [[{"node": "Send WA voice note", "type": "main", "index": 0}]]},
+    "Send WA voice note": {"main": [[{"node": "Log to Sheet", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"},
+  "meta": {"templateId": "skynetlabs-16", "instanceId": "REPLACE_ME"},
+  "tags": [{"name": "skynetlabs-pack"}, {"name": "ecommerce"}, {"name": "abandoned-cart"}, {"name": "whatsapp"}]
+}

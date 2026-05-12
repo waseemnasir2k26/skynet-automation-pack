@@ -1,0 +1,183 @@
+{
+  "name": "10 - FAQ -> schema -> WP REST inject",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "faq-inject",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "trigger-webhook",
+      "name": "Webhook (post URL or ID)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "url": "=REPLACE_ME_WP_BASE_URL/wp-json/wp/v2/posts/{{ $json.body.post_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "wordpressApi",
+        "options": {}
+      },
+      "id": "fetch-post",
+      "name": "WP - fetch post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 300],
+      "credentials": {
+        "wordpressApi": {
+          "id": "REPLACE_ME_WP",
+          "name": "WordPress Basic Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-sonnet-4-6",
+          "mode": "list"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are an AEO schema engineer.\n\nMY NICHE: REPLACE_ME (e.g. n8n + AEO for B2B agencies).\nMY TONE: Direct, plain English, no marketing fluff.\n\nGiven this post, write 6 FAQ pairs that match how real users phrase their questions to ChatGPT / Perplexity / Google AIO. Ground every answer in the post body — do not invent stats. Answers should be 40-80 words, scannable, and rich in entity language.\n\nPOST TITLE: {{ $json.title.rendered }}\nPOST URL: {{ $json.link }}\nPOST CONTENT (HTML, stripped to first 6000 chars):\n{{ $json.content.rendered.replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').slice(0, 6000) }}\n\nReturn ONLY valid JSON:\n{\n  \"faqs\": [\n    {\"q\": \"...\", \"a\": \"...\"},\n    {\"q\": \"...\", \"a\": \"...\"},\n    {\"q\": \"...\", \"a\": \"...\"},\n    {\"q\": \"...\", \"a\": \"...\"},\n    {\"q\": \"...\", \"a\": \"...\"},\n    {\"q\": \"...\", \"a\": \"...\"}\n  ]\n}",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 2000
+        }
+      },
+      "id": "claude-faq",
+      "name": "Claude - 6 FAQs",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1.2,
+      "position": [640, 300],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_ME_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.content?.[0]?.text || $input.first().json.text || '';\nconst match = raw.match(/\\{[\\s\\S]*\\}/);\nif (!match) throw new Error('No JSON in Claude reply');\nconst { faqs } = JSON.parse(match[0]);\nif (!Array.isArray(faqs) || faqs.length < 3) throw new Error('Need at least 3 FAQ pairs');\n\nconst post = $('WP - fetch post').first().json;\n\nconst schema = {\n  '@context': 'https://schema.org',\n  '@type': 'FAQPage',\n  mainEntity: faqs.map(f => ({\n    '@type': 'Question',\n    name: f.q,\n    acceptedAnswer: {\n      '@type': 'Answer',\n      text: f.a\n    }\n  }))\n};\n\n// Quick validation\nfor (const item of schema.mainEntity) {\n  if (!item.name || !item.acceptedAnswer.text) {\n    throw new Error('Empty FAQ field — refusing to write');\n  }\n}\n\nreturn [{\n  json: {\n    post_id: post.id,\n    post_title: post.title.rendered,\n    post_url: post.link,\n    faqs,\n    schema_jsonld: JSON.stringify(schema),\n    injected_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "build-schema",
+      "name": "Build + validate JSON-LD",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=REPLACE_ME_WP_BASE_URL/wp-json/wp/v2/posts/{{ $json.post_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "wordpressApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"meta\": {\n    \"aeo_faq_schema\": {{ JSON.stringify($json.schema_jsonld) }}\n  }\n}",
+        "options": {}
+      },
+      "id": "wp-patch",
+      "name": "WP - inject meta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1080, 300],
+      "credentials": {
+        "wordpressApi": {
+          "id": "REPLACE_ME_WP",
+          "name": "WordPress Basic Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.id }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ]
+        }
+      },
+      "id": "if-success",
+      "name": "If WP returned ID",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1300, 300]
+    },
+    {
+      "parameters": {
+        "channel": "#aeo-injects",
+        "text": "=:white_check_mark: *FAQ schema injected*\n\n*Post:* <{{ $('Build + validate JSON-LD').item.json.post_url }}|{{ $('Build + validate JSON-LD').item.json.post_title }}>\n*Post ID:* {{ $('Build + validate JSON-LD').item.json.post_id }}\n*FAQs:* {{ $('Build + validate JSON-LD').item.json.faqs.length }}\n*Validate:* https://search.google.com/test/rich-results?url={{ encodeURIComponent($('Build + validate JSON-LD').item.json.post_url) }}",
+        "otherOptions": {}
+      },
+      "id": "slack-ok",
+      "name": "Slack - success",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1520, 200],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_ME_SLACK",
+          "name": "Slack OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "#aeo-injects",
+        "text": "=:x: *FAQ inject FAILED*\n\nPost: {{ $('Build + validate JSON-LD').item.json.post_url }}\nResponse: ```{{ JSON.stringify($json).slice(0, 400) }}```\n\nCheck: meta key `aeo_faq_schema` registered with `show_in_rest=true`?",
+        "otherOptions": {}
+      },
+      "id": "slack-fail",
+      "name": "Slack - fail",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1520, 400],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_ME_SLACK",
+          "name": "Slack OAuth"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook (post URL or ID)": { "main": [[{ "node": "WP - fetch post", "type": "main", "index": 0 }]] },
+    "WP - fetch post": { "main": [[{ "node": "Claude - 6 FAQs", "type": "main", "index": 0 }]] },
+    "Claude - 6 FAQs": { "main": [[{ "node": "Build + validate JSON-LD", "type": "main", "index": 0 }]] },
+    "Build + validate JSON-LD": { "main": [[{ "node": "WP - inject meta", "type": "main", "index": 0 }]] },
+    "WP - inject meta": { "main": [[{ "node": "If WP returned ID", "type": "main", "index": 0 }]] },
+    "If WP returned ID": {
+      "main": [
+        [{ "node": "Slack - success", "type": "main", "index": 0 }],
+        [{ "node": "Slack - fail", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "templateId": "skynetlabs-10",
+    "instanceId": "REPLACE_ME"
+  },
+  "tags": [{"name": "skynetlabs-pack"}, {"name": "wordpress"}, {"name": "aeo"}]
+}

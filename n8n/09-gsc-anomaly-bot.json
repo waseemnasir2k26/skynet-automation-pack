@@ -1,0 +1,199 @@
+{
+  "name": "09 - GSC anomaly bot",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "trigger-cron",
+      "name": "Daily 6am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://searchconsole.googleapis.com/webmasters/v3/sites/{{ encodeURIComponent('REPLACE_ME_GSC_SITE_URL') }}/searchAnalytics/query",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"startDate\": \"{{ DateTime.now().minus({days: 8}).toFormat('yyyy-MM-dd') }}\",\n  \"endDate\": \"{{ DateTime.now().minus({days: 1}).toFormat('yyyy-MM-dd') }}\",\n  \"dimensions\": [\"page\", \"query\"],\n  \"rowLimit\": 500\n}",
+        "options": {}
+      },
+      "id": "gsc-current",
+      "name": "GSC - last 7 days",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 200],
+      "credentials": {
+        "googleApi": {
+          "id": "REPLACE_ME_GSC_SERVICE_ACCOUNT",
+          "name": "Google Service Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://searchconsole.googleapis.com/webmasters/v3/sites/{{ encodeURIComponent('REPLACE_ME_GSC_SITE_URL') }}/searchAnalytics/query",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"startDate\": \"{{ DateTime.now().minus({days: 15}).toFormat('yyyy-MM-dd') }}\",\n  \"endDate\": \"{{ DateTime.now().minus({days: 8}).toFormat('yyyy-MM-dd') }}\",\n  \"dimensions\": [\"page\", \"query\"],\n  \"rowLimit\": 500\n}",
+        "options": {}
+      },
+      "id": "gsc-prior",
+      "name": "GSC - prior 7 days",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 400],
+      "credentials": {
+        "googleApi": {
+          "id": "REPLACE_ME_GSC_SERVICE_ACCOUNT",
+          "name": "Google Service Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const current = $('GSC - last 7 days').first().json.rows || [];\nconst prior = $('GSC - prior 7 days').first().json.rows || [];\nconst priorMap = new Map();\nfor (const r of prior) {\n  priorMap.set(r.keys.join('|'), r);\n}\nconst drops = [];\nfor (const r of current) {\n  const k = r.keys.join('|');\n  const p = priorMap.get(k);\n  if (!p) continue;\n  if (p.clicks < 5) continue; // ignore noise\n  const pct = (r.clicks - p.clicks) / p.clicks;\n  if (pct <= -0.25) {\n    drops.push({\n      page: r.keys[0],\n      query: r.keys[1],\n      clicks_now: r.clicks,\n      clicks_prior: p.clicks,\n      pct_change: Math.round(pct * 100),\n      impressions_now: r.impressions,\n      impressions_prior: p.impressions,\n      position_now: Math.round(r.position * 10) / 10,\n      position_prior: Math.round(p.position * 10) / 10\n    });\n  }\n}\ndrops.sort((a, b) => a.pct_change - b.pct_change);\nreturn drops.slice(0, 10).map(d => ({ json: d }));"
+      },
+      "id": "diff",
+      "name": "Compare + flag drops",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-sonnet-4-6",
+          "mode": "list"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are an SEO diagnostician.\n\nA URL on my site lost organic clicks week-over-week. Diagnose the likely cause and the cheapest fix.\n\nPAGE: {{ $json.page }}\nQUERY: {{ $json.query }}\nCLICKS: {{ $json.clicks_prior }} -> {{ $json.clicks_now }} ({{ $json.pct_change }}%)\nIMPRESSIONS: {{ $json.impressions_prior }} -> {{ $json.impressions_now }}\nAVG POSITION: {{ $json.position_prior }} -> {{ $json.position_now }}\n\nCommon causes to consider:\n- Meta description blanked or rewritten (Yoast / Rank Math)\n- Title tag changed\n- Canonical now points elsewhere\n- Page de-indexed (noindex slipped in)\n- Internal links lost (a hub page changed)\n- SERP feature appeared (AIO, featured snippet stolen)\n- Content drift (page no longer matches query intent)\n- Algorithm update window\n\nReturn ONLY valid JSON:\n{\n  \"likely_cause\": \"one of the above, picked on evidence\",\n  \"confidence\": \"low|medium|high\",\n  \"fix_suggestion\": \"one specific 15-60 min action\",\n  \"priority\": \"P0|P1|P2\"\n}",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.2,
+          "maxTokens": 500
+        }
+      },
+      "id": "claude-diagnose",
+      "name": "Claude - diagnose",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1.2,
+      "position": [860, 300],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_ME_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.content?.[0]?.text || $input.first().json.text || '';\nconst match = raw.match(/\\{[\\s\\S]*\\}/);\nif (!match) throw new Error('No JSON in Claude reply');\nconst parsed = JSON.parse(match[0]);\nconst data = $('Compare + flag drops').first().json;\nreturn [{\n  json: {\n    ...data,\n    ...parsed,\n    checked_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "merge",
+      "name": "Merge diagnosis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1080, 300]
+    },
+    {
+      "parameters": {
+        "channel": "#seo-alerts",
+        "text": "=:warning: *GSC drop · {{ $json.priority }}* — {{ $json.pct_change }}%\n\n*Page:* {{ $json.page }}\n*Query:* `{{ $json.query }}`\n*Clicks:* {{ $json.clicks_prior }} → {{ $json.clicks_now }}\n*Position:* {{ $json.position_prior }} → {{ $json.position_now }}\n\n*Likely cause* ({{ $json.confidence }}): {{ $json.likely_cause }}\n*Fix:* {{ $json.fix_suggestion }}",
+        "otherOptions": {}
+      },
+      "id": "slack-alert",
+      "name": "Slack alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1300, 200],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_ME_SLACK",
+          "name": "Slack OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_ME_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gsc-anomaly-log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "checked_at": "={{ $json.checked_at }}",
+            "page": "={{ $json.page }}",
+            "query": "={{ $json.query }}",
+            "clicks_now": "={{ $json.clicks_now }}",
+            "clicks_prior": "={{ $json.clicks_prior }}",
+            "pct_change": "={{ $json.pct_change }}",
+            "likely_cause": "={{ $json.likely_cause }}",
+            "fix_suggestion": "={{ $json.fix_suggestion }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheets-log",
+      "name": "Log to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1300, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME_GSHEETS",
+          "name": "Google Sheets OAuth"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 6am": {
+      "main": [[
+        { "node": "GSC - last 7 days", "type": "main", "index": 0 },
+        { "node": "GSC - prior 7 days", "type": "main", "index": 0 }
+      ]]
+    },
+    "GSC - last 7 days": { "main": [[{ "node": "Compare + flag drops", "type": "main", "index": 0 }]] },
+    "Compare + flag drops": { "main": [[{ "node": "Claude - diagnose", "type": "main", "index": 0 }]] },
+    "Claude - diagnose": { "main": [[{ "node": "Merge diagnosis", "type": "main", "index": 0 }]] },
+    "Merge diagnosis": {
+      "main": [[
+        { "node": "Slack alert", "type": "main", "index": 0 },
+        { "node": "Log to Sheet", "type": "main", "index": 0 }
+      ]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "templateId": "skynetlabs-09",
+    "instanceId": "REPLACE_ME"
+  },
+  "tags": [{"name": "skynetlabs-pack"}, {"name": "seo"}, {"name": "monitoring"}]
+}

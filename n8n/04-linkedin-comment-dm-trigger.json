@@ -1,0 +1,237 @@
+{
+  "name": "04 - LinkedIn Comment DM Trigger",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {"field": "minutes", "minutesInterval": 10}
+          ]
+        }
+      },
+      "id": "trigger-cron",
+      "name": "Every 10 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.unipile.com/api/v1/posts/{{ $env.LI_POST_ID }}/comments",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "account_id", "value": "={{ $env.UNIPILE_LINKEDIN_ACCOUNT_ID }}"},
+            {"name": "limit", "value": "100"}
+          ]
+        },
+        "options": {}
+      },
+      "id": "fetch-comments",
+      "name": "Fetch post comments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME_UNIPILE_HEADER",
+          "name": "Unipile API Header"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "items",
+        "options": {}
+      },
+      "id": "split",
+      "name": "Split each comment",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": false, "typeValidation": "strict"},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.text }}",
+              "rightValue": "={{ $env.TRIGGER_KEYWORD }}",
+              "operator": {"type": "string", "operation": "contains"}
+            }
+          ]
+        }
+      },
+      "id": "if-keyword",
+      "name": "If contains keyword",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "operation": "lookup",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_ME_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "comment-dm-log",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {"lookupColumn": "profile_url", "lookupValue": "={{ $json.author.public_profile_url }}"}
+          ]
+        },
+        "options": {"returnAllMatches": false}
+      },
+      "id": "dedupe-check",
+      "name": "Already DM'd?",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1080, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME_GSHEETS",
+          "name": "Google Sheets OAuth"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "typeValidation": "strict"},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.dm_sent_at }}",
+              "rightValue": "",
+              "operator": {"type": "string", "operation": "empty"}
+            }
+          ]
+        }
+      },
+      "id": "if-not-dmed",
+      "name": "If not DM'd",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1300, 300]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-sonnet-4-6",
+          "mode": "list"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Write a short, warm LinkedIn DM for someone who just commented '{{ $env.TRIGGER_KEYWORD }}' on my post.\n\nMY VOICE: SkynetLabs (Waseem Nasir). Direct, friendly, no marketing-speak.\n\nTHEIR DETAILS:\nName: {{ $('Split each comment').item.json.author.name }}\nHeadline: {{ $('Split each comment').item.json.author.headline }}\nThey commented: {{ $('Split each comment').item.json.text }}\n\nMY POST WAS ABOUT: {{ $env.POST_TOPIC }}\nTHE LEAD MAGNET URL: {{ $env.LEAD_MAGNET_URL }}\n\nWrite ONLY the DM body (max 80 words). Don't say 'thanks for commenting'. Reference their headline briefly. Drop the link naturally. End with a soft open question (no hard CTA).\n\nReturn just the DM text, no JSON, no quotes.",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 400
+        }
+      },
+      "id": "claude-dm",
+      "name": "Claude personalize DM",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1.2,
+      "position": [1520, 300],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_ME_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.unipile.com/api/v1/chats",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"account_id\": \"{{ $env.UNIPILE_LINKEDIN_ACCOUNT_ID }}\",\n  \"attendees_ids\": [\"{{ $('Split each comment').item.json.author.provider_id }}\"],\n  \"text\": {{ JSON.stringify($json.content?.[0]?.text || $json.text || '') }}\n}",
+        "options": {}
+      },
+      "id": "send-dm",
+      "name": "Send DM via Unipile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1740, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME_UNIPILE_HEADER",
+          "name": "Unipile API Header"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_ME_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "comment-dm-log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "commented_at": "={{ $('Split each comment').item.json.created_at }}",
+            "name": "={{ $('Split each comment').item.json.author.name }}",
+            "profile_url": "={{ $('Split each comment').item.json.author.public_profile_url }}",
+            "comment_text": "={{ $('Split each comment').item.json.text }}",
+            "dm_sent_at": "={{ new Date().toISOString() }}",
+            "dm_body": "={{ $('Claude personalize DM').item.json.content?.[0]?.text || $('Claude personalize DM').item.json.text }}",
+            "status": "sent"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-sent",
+      "name": "Log sent DM",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1960, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME_GSHEETS",
+          "name": "Google Sheets OAuth"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 10 min": {"main": [[{"node": "Fetch post comments", "type": "main", "index": 0}]]},
+    "Fetch post comments": {"main": [[{"node": "Split each comment", "type": "main", "index": 0}]]},
+    "Split each comment": {"main": [[{"node": "If contains keyword", "type": "main", "index": 0}]]},
+    "If contains keyword": {"main": [[{"node": "Already DM'd?", "type": "main", "index": 0}], []]},
+    "Already DM'd?": {"main": [[{"node": "If not DM'd", "type": "main", "index": 0}]]},
+    "If not DM'd": {"main": [[{"node": "Claude personalize DM", "type": "main", "index": 0}], []]},
+    "Claude personalize DM": {"main": [[{"node": "Send DM via Unipile", "type": "main", "index": 0}]]},
+    "Send DM via Unipile": {"main": [[{"node": "Log sent DM", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"},
+  "meta": {
+    "templateId": "skynetlabs-04",
+    "instanceId": "REPLACE_ME"
+  },
+  "tags": [{"name": "skynetlabs-pack"}, {"name": "linkedin"}, {"name": "comment-trigger"}]
+}

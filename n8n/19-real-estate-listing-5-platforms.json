@@ -1,0 +1,166 @@
+{
+  "name": "19 - Real Estate Listing 5 Platforms",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {"item": [{"mode": "everyMinute"}]},
+        "triggerOn": "recordCreated",
+        "tableId": {"__rl": true, "value": "REPLACE_ME_AIRTABLE_TABLE", "mode": "id"},
+        "baseId": {"__rl": true, "value": "REPLACE_ME_AIRTABLE_BASE", "mode": "id"},
+        "additionalFields": {"viewId": "ready_to_publish"}
+      },
+      "id": "airtable-trigger",
+      "name": "New listing in Airtable",
+      "type": "n8n-nodes-base.airtableTrigger",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "credentials": {
+        "airtableTokenApi": {"id": "REPLACE_ME_AIRTABLE", "name": "Airtable PAT"}
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {"__rl": true, "value": "claude-sonnet-4-6", "mode": "list"},
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a senior real estate copywriter producing 5 platform-specific variants for the same listing.\n\nLISTING:\nAddress: {{ $json.fields.address }}\nPrice: ${{ $json.fields.price }}\nBeds: {{ $json.fields.beds }}\nBaths: {{ $json.fields.baths }}\nSqFt: {{ $json.fields.sqft }}\nKey features: {{ $json.fields.features }}\nNeighborhood: {{ $json.fields.neighborhood }}\nAgent: {{ $json.fields.agent_name }}\n\nReturn ONLY valid JSON:\n{\n  \"mls_description\": \"160-220 word formal description, MLS-compliant, no all-caps, no exclamations\",\n  \"instagram_caption\": \"90-130 word IG caption, conversational, 1 line breaks, 4-6 relevant hashtags\",\n  \"instagram_slides\": [\"slide 1 headline\", \"slide 2 feature\", \"slide 3 feature\", \"slide 4 neighborhood\", \"slide 5 CTA\"],\n  \"facebook_marketplace\": \"60-90 word FB Marketplace listing, casual, ends with 'DM to schedule a viewing'\",\n  \"zillow_blurb\": \"exactly 1 sentence, max 140 chars, hook-first\",\n  \"landing_page\": {\n    \"hero_headline\": \"6-10 words, benefit-first\",\n    \"hero_sub\": \"15-25 word supporting line\",\n    \"three_features\": [\"feature 1 with number\", \"feature 2 with number\", \"feature 3 with number\"],\n    \"cta\": \"Book a viewing — 7 words max\"\n  }\n}",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {"temperature": 0.7, "maxTokens": 2000}
+      },
+      "id": "claude-variants",
+      "name": "Claude — 5 variants",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1.2,
+      "position": [420, 300],
+      "credentials": {
+        "anthropicApi": {"id": "REPLACE_ME_ANTHROPIC", "name": "Anthropic API"}
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.content?.[0]?.text || $input.first().json.text || '';\nconst match = raw.match(/\\{[\\s\\S]*\\}/);\nif (!match) throw new Error('No JSON in Claude reply');\nconst v = JSON.parse(match[0]);\nconst row = $('New listing in Airtable').first().json;\nreturn [{\n  json: {\n    ...v,\n    listing_id: row.id,\n    address: row.fields.address,\n    price: row.fields.price,\n    slug: row.fields.address.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),\n    photo_urls: (row.fields.photos || []).map(p => p.url)\n  }\n}];"
+      },
+      "id": "parse",
+      "name": "Parse + enrich",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://services.leadconnectorhq.com/social-media-posting/REPLACE_ME_GHL_LOCATION/posts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"accountIds\": [\"REPLACE_ME_GHL_IG_ACCOUNT\"],\n  \"summary\": \"{{ $json.instagram_caption }}\",\n  \"media\": {{ JSON.stringify($json.photo_urls.slice(0, 10).map(url => ({url, type: 'image'}))) }},\n  \"scheduleDate\": \"{{ $now.plus({minutes: 5}).toISO() }}\",\n  \"type\": \"post\"\n}",
+        "options": {}
+      },
+      "id": "ghl-instagram",
+      "name": "Post to Instagram (GHL)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 200],
+      "credentials": {
+        "httpHeaderAuth": {"id": "REPLACE_ME_GHL", "name": "GHL Bearer"}
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://services.leadconnectorhq.com/social-media-posting/REPLACE_ME_GHL_LOCATION/posts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"accountIds\": [\"REPLACE_ME_GHL_FB_ACCOUNT\"],\n  \"summary\": \"{{ $json.facebook_marketplace }}\",\n  \"media\": {{ JSON.stringify($json.photo_urls.slice(0, 4).map(url => ({url, type: 'image'}))) }},\n  \"scheduleDate\": \"{{ $now.plus({minutes: 5}).toISO() }}\",\n  \"type\": \"post\"\n}",
+        "options": {}
+      },
+      "id": "ghl-facebook",
+      "name": "Post to Facebook (GHL)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 400],
+      "credentials": {
+        "httpHeaderAuth": {"id": "REPLACE_ME_GHL", "name": "GHL Bearer"}
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.webflow.com/v2/collections/REPLACE_ME_WEBFLOW_COLLECTION/items/live",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"fieldData\": {\n    \"name\": \"{{ $('Parse + enrich').first().json.address }}\",\n    \"slug\": \"{{ $('Parse + enrich').first().json.slug }}\",\n    \"hero-headline\": \"{{ $('Parse + enrich').first().json.landing_page.hero_headline }}\",\n    \"hero-sub\": \"{{ $('Parse + enrich').first().json.landing_page.hero_sub }}\",\n    \"price\": {{ $('Parse + enrich').first().json.price }},\n    \"mls-description\": \"{{ $('Parse + enrich').first().json.mls_description }}\",\n    \"features\": {{ JSON.stringify($('Parse + enrich').first().json.landing_page.three_features) }},\n    \"photos\": {{ JSON.stringify($('Parse + enrich').first().json.photo_urls) }}\n  }\n}",
+        "options": {}
+      },
+      "id": "webflow-cms",
+      "name": "Create landing page (Webflow)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1080, 300],
+      "credentials": {
+        "httpHeaderAuth": {"id": "REPLACE_ME_WEBFLOW", "name": "Webflow API Token"}
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "listings@skynetjoe.com",
+        "toEmail": "={{ $('New listing in Airtable').first().json.fields.agent_email }}",
+        "subject": "=Marketplace + Zillow copy for {{ $('Parse + enrich').first().json.address }}",
+        "emailType": "text",
+        "message": "=Hey,\n\nHere's the platform copy for {{ $('Parse + enrich').first().json.address }}. Paste into the manual platforms.\n\n--- FACEBOOK MARKETPLACE ---\n{{ $('Parse + enrich').first().json.facebook_marketplace }}\n\n--- ZILLOW BLURB ---\n{{ $('Parse + enrich').first().json.zillow_blurb }}\n\n--- MLS DESCRIPTION ---\n{{ $('Parse + enrich').first().json.mls_description }}\n\nLanding page: https://yoursite.com/listings/{{ $('Parse + enrich').first().json.slug }}\nIG + FB: already scheduled via GHL.\n\nOnward,\nThe Engine",
+        "options": {}
+      },
+      "id": "email-agent",
+      "name": "Email agent copy pack",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1300, 300],
+      "credentials": {
+        "smtp": {"id": "REPLACE_ME_SMTP", "name": "SMTP"}
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "baseId": {"__rl": true, "value": "REPLACE_ME_AIRTABLE_BASE", "mode": "id"},
+        "tableId": {"__rl": true, "value": "REPLACE_ME_AIRTABLE_TABLE", "mode": "id"},
+        "id": "={{ $('New listing in Airtable').first().json.id }}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "published",
+            "published_at": "={{ $now.toISO() }}",
+            "landing_url": "=https://yoursite.com/listings/{{ $('Parse + enrich').first().json.slug }}"
+          }
+        }
+      },
+      "id": "airtable-update",
+      "name": "Mark Airtable published",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [1520, 300],
+      "credentials": {
+        "airtableTokenApi": {"id": "REPLACE_ME_AIRTABLE", "name": "Airtable PAT"}
+      }
+    }
+  ],
+  "connections": {
+    "New listing in Airtable": {"main": [[{"node": "Claude — 5 variants", "type": "main", "index": 0}]]},
+    "Claude — 5 variants": {"main": [[{"node": "Parse + enrich", "type": "main", "index": 0}]]},
+    "Parse + enrich": {"main": [[{"node": "Post to Instagram (GHL)", "type": "main", "index": 0}, {"node": "Post to Facebook (GHL)", "type": "main", "index": 0}, {"node": "Create landing page (Webflow)", "type": "main", "index": 0}]]},
+    "Create landing page (Webflow)": {"main": [[{"node": "Email agent copy pack", "type": "main", "index": 0}]]},
+    "Email agent copy pack": {"main": [[{"node": "Mark Airtable published", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"},
+  "meta": {"templateId": "skynetlabs-19", "instanceId": "REPLACE_ME"},
+  "tags": [{"name": "skynetlabs-pack"}, {"name": "real-estate"}, {"name": "multi-platform"}, {"name": "claude"}]
+}

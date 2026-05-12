@@ -1,0 +1,186 @@
+{
+  "name": "07 - Competitor blog -> my-angle draft",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "trigger-cron",
+      "name": "Every 2 hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://competitor-one.com/feed/",
+        "options": {}
+      },
+      "id": "rss-read",
+      "name": "RSS - competitor feeds",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [420, 300],
+      "notes": "Duplicate this node per competitor OR swap URL for a single multiplexed feed (Inoreader, Feedly).",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.pubDate }}",
+              "rightValue": "={{ DateTime.now().minus({hours: 3}).toISO() }}",
+              "operator": {
+                "type": "dateTime",
+                "operation": "after"
+              }
+            }
+          ]
+        }
+      },
+      "id": "if-fresh",
+      "name": "If posted < 3h ago",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.firecrawl.dev/v1/scrape",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"url\": \"{{ $json.link }}\",\n  \"formats\": [\"markdown\"]\n}",
+        "options": {}
+      },
+      "id": "scrape-body",
+      "name": "Firecrawl - scrape body",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME_FIRECRAWL",
+          "name": "Firecrawl API Header"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-sonnet-4-6",
+          "mode": "list"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a senior content strategist for a B2B brand.\n\nMY BRAND VOICE: Direct, contrarian, plain English, no buzzwords, weighs cost vs leverage, opinionated.\nMY NICHE: REPLACE_ME (e.g. AEO + n8n automation for agencies).\n\nA competitor just published this:\n\nTITLE: {{ $('RSS - competitor feeds').item.json.title }}\nURL: {{ $('RSS - competitor feeds').item.json.link }}\nBODY (markdown):\n{{ $json.data.markdown }}\n\nDo this:\n1. Identify the core claim or takeaway (1 sentence).\n2. Find the weak point — what is missing, oversimplified, or hype.\n3. Draft my contrarian angle: a 700-900 word blog post that respects their work but corrects/extends it. Use my voice. No fluff intros. Open with the disagreement.\n\nReturn ONLY valid JSON:\n{\n  \"competitor_claim\": \"...\",\n  \"weak_point\": \"...\",\n  \"my_angle_title\": \"...\",\n  \"my_angle_meta\": \"<=160 char meta description\",\n  \"draft_markdown\": \"full 700-900 word draft\"\n}",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.6,
+          "maxTokens": 3000
+        }
+      },
+      "id": "claude-angle",
+      "name": "Claude - my-angle draft",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1.2,
+      "position": [1080, 200],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_ME_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.content?.[0]?.text || $input.first().json.text || '';\nconst match = raw.match(/\\{[\\s\\S]*\\}/);\nif (!match) throw new Error('No JSON in Claude reply');\nconst parsed = JSON.parse(match[0]);\nconst src = $('RSS - competitor feeds').first().json;\nreturn [{\n  json: {\n    ...parsed,\n    source_title: src.title,\n    source_url: src.link,\n    drafted_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "parse",
+      "name": "Parse Claude reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 200]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "folderId": {
+          "__rl": true,
+          "value": "REPLACE_ME_GDOCS_FOLDER_ID",
+          "mode": "id"
+        },
+        "title": "={{ $json.my_angle_title }}",
+        "content": "=# {{ $json.my_angle_title }}\n\n_Meta: {{ $json.my_angle_meta }}_\n\n**Source:** [{{ $json.source_title }}]({{ $json.source_url }})\n**Their claim:** {{ $json.competitor_claim }}\n**Weak point:** {{ $json.weak_point }}\n\n---\n\n{{ $json.draft_markdown }}"
+      },
+      "id": "gdocs-create",
+      "name": "Google Doc draft",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [1520, 200],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "REPLACE_ME_GDOCS",
+          "name": "Google Docs OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "#content-drafts",
+        "text": "=:bookmark_tabs: *New angle draft ready*\n\n*Source:* <{{ $('Parse Claude reply').item.json.source_url }}|{{ $('Parse Claude reply').item.json.source_title }}>\n*My angle:* {{ $('Parse Claude reply').item.json.my_angle_title }}\n*Their claim:* {{ $('Parse Claude reply').item.json.competitor_claim }}\n*Weak point:* {{ $('Parse Claude reply').item.json.weak_point }}\n\n:memo: Doc: {{ $json.webViewLink || $json.id }}",
+        "otherOptions": {}
+      },
+      "id": "slack-ping",
+      "name": "Slack ping",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1740, 200],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_ME_SLACK",
+          "name": "Slack OAuth"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 2 hours": { "main": [[{ "node": "RSS - competitor feeds", "type": "main", "index": 0 }]] },
+    "RSS - competitor feeds": { "main": [[{ "node": "If posted < 3h ago", "type": "main", "index": 0 }]] },
+    "If posted < 3h ago": {
+      "main": [
+        [{ "node": "Firecrawl - scrape body", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Firecrawl - scrape body": { "main": [[{ "node": "Claude - my-angle draft", "type": "main", "index": 0 }]] },
+    "Claude - my-angle draft": { "main": [[{ "node": "Parse Claude reply", "type": "main", "index": 0 }]] },
+    "Parse Claude reply": { "main": [[{ "node": "Google Doc draft", "type": "main", "index": 0 }]] },
+    "Google Doc draft": { "main": [[{ "node": "Slack ping", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "templateId": "skynetlabs-07",
+    "instanceId": "REPLACE_ME"
+  },
+  "tags": [{"name": "skynetlabs-pack"}, {"name": "content"}, {"name": "seo"}]
+}

@@ -1,0 +1,141 @@
+{
+  "name": "17 - Negative Review AI Reply Draft",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "review-incoming",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-review",
+      "name": "Review webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "typeValidation": "strict"},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.body.rating }}",
+              "rightValue": 3,
+              "operator": {"type": "number", "operation": "lte"}
+            }
+          ]
+        }
+      },
+      "id": "if-negative",
+      "name": "If rating <= 3",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://{{ $env.SHOPIFY_STORE }}.myshopify.com/admin/api/2024-04/orders.json?email={{ $json.body.reviewer_email }}&status=any&limit=3",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "fetch-orders",
+      "name": "Fetch customer orders",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 300],
+      "credentials": {
+        "httpHeaderAuth": {"id": "REPLACE_ME_SHOPIFY", "name": "Shopify Admin Token"}
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {"__rl": true, "value": "claude-sonnet-4-6", "mode": "list"},
+        "messages": {
+          "values": [
+            {
+              "content": "=You are drafting a reply to a negative customer review for a SkynetLabs client store.\n\nBRAND VOICE (paste yours here, replace this block):\n- Tone: warm, accountable, never defensive\n- Always thank for honest feedback\n- Acknowledge the specific pain in their own words\n- Offer a concrete next step (refund, replacement, DM owner)\n- Sign off: 'Onward, [Owner First Name]'\n- BANNED: 'We apologize for any inconvenience', 'reach out to our team', exclamation marks, emojis\n\nREVIEW:\nRating: {{ $('Review webhook').first().json.body.rating }}/5\nReviewer: {{ $('Review webhook').first().json.body.reviewer_name }}\nTitle: {{ $('Review webhook').first().json.body.title }}\nBody: {{ $('Review webhook').first().json.body.body }}\nProduct: {{ $('Review webhook').first().json.body.product_title }}\n\nCUSTOMER ORDER HISTORY:\n{{ JSON.stringify($json.orders) }}\n\nReturn ONLY valid JSON:\n{\n  \"draft_reply\": \"75-120 word reply in brand voice\",\n  \"severity\": \"low|medium|high\",\n  \"root_cause\": \"one-line guess at what actually went wrong\",\n  \"recommended_action\": \"refund|replacement|owner_dm|escalate|reply_only\"\n}",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {"temperature": 0.4, "maxTokens": 700}
+      },
+      "id": "claude-draft",
+      "name": "Claude — draft reply",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1.2,
+      "position": [860, 300],
+      "credentials": {
+        "anthropicApi": {"id": "REPLACE_ME_ANTHROPIC", "name": "Anthropic API"}
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.content?.[0]?.text || $input.first().json.text || '';\nconst match = raw.match(/\\{[\\s\\S]*\\}/);\nif (!match) throw new Error('No JSON in Claude reply');\nconst parsed = JSON.parse(match[0]);\nconst review = $('Review webhook').first().json.body;\nreturn [{\n  json: {\n    ...parsed,\n    review_id: review.id,\n    reviewer_name: review.reviewer_name,\n    rating: review.rating,\n    review_title: review.title,\n    review_body: review.body,\n    product_title: review.product_title,\n    drafted_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "parse-draft",
+      "name": "Parse draft",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1080, 300]
+    },
+    {
+      "parameters": {
+        "channel": "REPLACE_ME_SLACK_CHANNEL",
+        "text": "=⚠️ *{{ $json.rating }}-star review from {{ $json.reviewer_name }}*\n\n*Product:* {{ $json.product_title }}\n*Severity:* {{ $json.severity }}\n*Root cause:* {{ $json.root_cause }}\n*Suggested action:* {{ $json.recommended_action }}\n\n*Their review:*\n> {{ $json.review_body }}\n\n*Draft reply:*\n```\n{{ $json.draft_reply }}\n```\n\nApprove with ✅ to auto-post, edit with ✏️, skip with ❌",
+        "otherOptions": {}
+      },
+      "id": "slack-approve",
+      "name": "Slack approval",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1300, 300],
+      "credentials": {
+        "slackApi": {"id": "REPLACE_ME_SLACK", "name": "Slack OAuth"}
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {"__rl": true, "value": "REPLACE_ME_SHEET_ID", "mode": "id"},
+        "sheetName": {"__rl": true, "value": "review_drafts", "mode": "name"},
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "drafted_at": "={{ $json.drafted_at }}",
+            "review_id": "={{ $json.review_id }}",
+            "reviewer": "={{ $json.reviewer_name }}",
+            "rating": "={{ $json.rating }}",
+            "product": "={{ $json.product_title }}",
+            "severity": "={{ $json.severity }}",
+            "root_cause": "={{ $json.root_cause }}",
+            "action": "={{ $json.recommended_action }}",
+            "draft_reply": "={{ $json.draft_reply }}",
+            "status": "awaiting_approval"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheet-log",
+      "name": "Log to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1520, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "REPLACE_ME_GSHEETS", "name": "Google Sheets OAuth"}
+      }
+    }
+  ],
+  "connections": {
+    "Review webhook": {"main": [[{"node": "If rating <= 3", "type": "main", "index": 0}]]},
+    "If rating <= 3": {"main": [[{"node": "Fetch customer orders", "type": "main", "index": 0}], []]},
+    "Fetch customer orders": {"main": [[{"node": "Claude — draft reply", "type": "main", "index": 0}]]},
+    "Claude — draft reply": {"main": [[{"node": "Parse draft", "type": "main", "index": 0}]]},
+    "Parse draft": {"main": [[{"node": "Slack approval", "type": "main", "index": 0}, {"node": "Log to Sheet", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"},
+  "meta": {"templateId": "skynetlabs-17", "instanceId": "REPLACE_ME"},
+  "tags": [{"name": "skynetlabs-pack"}, {"name": "ecommerce"}, {"name": "reviews"}, {"name": "claude"}]
+}

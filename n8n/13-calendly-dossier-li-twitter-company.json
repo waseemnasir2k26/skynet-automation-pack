@@ -1,0 +1,208 @@
+{
+  "name": "13 - Calendly Dossier (LI + Twitter + Company)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "calendly-booked",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "trigger-calendly",
+      "name": "Calendly invitee.created",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "REPLACE_ME_WEBHOOK_ID"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\nconst payload = body.payload || body;\nconst invitee = payload.invitee || payload;\nconst event = payload.event || {};\nconst answers = (invitee.questions_and_answers || []).reduce((a, q) => { a[q.question] = q.answer; return a; }, {});\nconst email = invitee.email;\nconst name = invitee.name;\nconst domain = (email || '').split('@')[1] || '';\nconst start = event.start_time || payload.scheduled_event?.start_time || new Date(Date.now() + 3600000).toISOString();\nreturn [{ json: { name, email, domain, start_time: start, company_hint: answers['Company'] || answers['company'] || '', li_hint: answers['LinkedIn'] || answers['linkedin'] || '', meeting_url: event.uri || '' } }];"
+      },
+      "id": "parse-booking",
+      "name": "Parse booking",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/dev_fusion~linkedin-profile-scraper/run-sync-get-dataset-items",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"queries\": [\"{{ $json.name }} {{ $json.company_hint || $json.domain }}\"],\n  \"maxItems\": 1\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "scrape-linkedin",
+      "name": "Scrape LinkedIn",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME_APIFY",
+          "name": "Apify Token"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/apidojo~twitter-scraper/run-sync-get-dataset-items",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"searchTerms\": [\"from:{{ $('Parse booking').first().json.name.split(' ')[0].toLowerCase() }} {{ $('Parse booking').first().json.company_hint }}\"],\n  \"maxItems\": 10\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "scrape-twitter",
+      "name": "Scrape X / Twitter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME_APIFY",
+          "name": "Apify Token"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "=https://{{ $('Parse booking').first().json.domain }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "scrape-site",
+      "name": "Fetch company homepage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 400],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const booking = $('Parse booking').first().json;\nconst li = $('Scrape LinkedIn').first()?.json?.[0] || {};\nconst tw = $('Scrape X / Twitter').first()?.json || [];\nconst site = String($('Fetch company homepage').first()?.json?.data || '').slice(0, 8000);\nconst siteText = site.replace(/<script[\\s\\S]*?<\\/script>/g, '').replace(/<style[\\s\\S]*?<\\/style>/g, '').replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').slice(0, 3500);\nreturn [{ json: { booking, linkedin: li, twitter_posts: tw.slice(0, 8), company_text: siteText } }];"
+      },
+      "id": "bundle",
+      "name": "Bundle for Claude",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-sonnet-4-6",
+          "mode": "list"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You write a pre-call dossier for a SkynetLabs sales call (automation + AEO agency). 1 page, scannable.\n\nINPUT:\n{{ JSON.stringify($json) }}\n\nWRITE markdown with these sections:\n\n**The person**\n- 3 bullets: role, tenure, anything notable\n\n**The company**\n- 3 bullets: what they do, rough size, recent signals\n\n**Likely pain (top 3)**\n- Map to: lead qualification, content ops, AI search visibility, internal automation\n\n**Top 3 discovery questions to ask**\n- Specific, not generic\n\n**Watch-outs**\n- Anything that suggests bad fit or budget mismatch\n\n**One-line opener**\n- A genuine observation to open the call with, NOT a flatter\n\nRules: no invented metrics. If a field is missing say 'not found'.",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.4,
+          "maxTokens": 1500
+        }
+      },
+      "id": "claude-dossier",
+      "name": "Claude dossier",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1.2,
+      "position": [1080, 300],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_ME_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const dossier = $input.first().json.content?.[0]?.text || $input.first().json.text || '';\nconst booking = $('Parse booking').first().json;\nconst start = new Date(booking.start_time);\nconst sendAt = new Date(start.getTime() - 10 * 60 * 1000);\nreturn [{ json: { dossier_md: dossier, send_at: sendAt.toISOString(), prospect_name: booking.name, prospect_email: booking.email, meeting_start: booking.start_time } }];"
+      },
+      "id": "compute-send-time",
+      "name": "Compute send time (T-10)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 300]
+    },
+    {
+      "parameters": {
+        "amount": "={{ Math.max(0, Math.floor((new Date($json.send_at).getTime() - Date.now()) / 1000)) }}",
+        "unit": "seconds"
+      },
+      "id": "wait-until",
+      "name": "Wait until T-10",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1520, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "REPLACE_ME_FROM_EMAIL",
+        "subject": "=Pre-call dossier — {{ $json.prospect_name }} ({{ $json.meeting_start }})",
+        "emailType": "text",
+        "message": "={{ $json.dossier_md }}",
+        "options": {}
+      },
+      "id": "gmail-send",
+      "name": "Email dossier",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1740, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_ME_GMAIL",
+          "name": "Gmail OAuth2"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Calendly invitee.created": { "main": [[{ "node": "Parse booking", "type": "main", "index": 0 }]] },
+    "Parse booking": {
+      "main": [
+        [
+          { "node": "Scrape LinkedIn", "type": "main", "index": 0 },
+          { "node": "Scrape X / Twitter", "type": "main", "index": 0 },
+          { "node": "Fetch company homepage", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Scrape LinkedIn": { "main": [[{ "node": "Bundle for Claude", "type": "main", "index": 0 }]] },
+    "Scrape X / Twitter": { "main": [[{ "node": "Bundle for Claude", "type": "main", "index": 0 }]] },
+    "Fetch company homepage": { "main": [[{ "node": "Bundle for Claude", "type": "main", "index": 0 }]] },
+    "Bundle for Claude": { "main": [[{ "node": "Claude dossier", "type": "main", "index": 0 }]] },
+    "Claude dossier": { "main": [[{ "node": "Compute send time (T-10)", "type": "main", "index": 0 }]] },
+    "Compute send time (T-10)": { "main": [[{ "node": "Wait until T-10", "type": "main", "index": 0 }]] },
+    "Wait until T-10": { "main": [[{ "node": "Email dossier", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "templateId": "skynetlabs-13",
+    "instanceId": "REPLACE_ME"
+  },
+  "tags": [{"name": "skynetlabs-pack"}, {"name": "sales"}, {"name": "calendly"}]
+}

@@ -1,0 +1,214 @@
+{
+  "name": "06 - AEO Citation Monitor (4 LLMs)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {"field": "cronExpression", "expression": "0 6 * * *"}
+          ]
+        }
+      },
+      "id": "trigger-cron",
+      "name": "Daily 6am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 400]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {"__rl": true, "value": "REPLACE_ME_SHEET_ID", "mode": "id"},
+        "sheetName": {"__rl": true, "value": "prompts", "mode": "name"},
+        "options": {}
+      },
+      "id": "read-prompts",
+      "name": "Read 30 prompts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [420, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME_GSHEETS",
+          "name": "Google Sheets OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "options": {}
+      },
+      "id": "split-prompts",
+      "name": "Split each prompt",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [640, 400]
+    },
+    {
+      "parameters": {
+        "modelId": {"__rl": true, "value": "claude-sonnet-4-6", "mode": "list"},
+        "messages": {
+          "values": [
+            {"content": "={{ $json.prompt }}", "role": "user"}
+          ]
+        },
+        "options": {"maxTokens": 800}
+      },
+      "id": "claude-answer",
+      "name": "Claude answer",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1.2,
+      "position": [860, 200],
+      "credentials": {
+        "anthropicApi": {"id": "REPLACE_ME_ANTHROPIC", "name": "Anthropic API"}
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.openai.com/v1/chat/completions",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o-mini\",\n  \"messages\": [{\"role\": \"user\", \"content\": {{ JSON.stringify($json.prompt) }} }],\n  \"max_tokens\": 800\n}",
+        "options": {}
+      },
+      "id": "openai-answer",
+      "name": "ChatGPT answer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 340],
+      "credentials": {
+        "httpHeaderAuth": {"id": "REPLACE_ME_OPENAI", "name": "OpenAI API"}
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.perplexity.ai/chat/completions",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"sonar\",\n  \"messages\": [{\"role\": \"user\", \"content\": {{ JSON.stringify($json.prompt) }} }],\n  \"max_tokens\": 800\n}",
+        "options": {}
+      },
+      "id": "perplexity-answer",
+      "name": "Perplexity answer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 480],
+      "credentials": {
+        "httpHeaderAuth": {"id": "REPLACE_ME_PERPLEXITY", "name": "Perplexity API"}
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={{ $env.GEMINI_API_KEY }}",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [{ \"parts\": [{ \"text\": {{ JSON.stringify($json.prompt) }} }] }]\n}",
+        "options": {}
+      },
+      "id": "gemini-answer",
+      "name": "Gemini answer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 620]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "id": "merge-answers",
+      "name": "Merge 4 answers",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1080, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const promptItem = $('Split each prompt').item.json;\nconst brands = (promptItem.brands || $env.TRACKED_BRANDS || 'SkynetLabs,waseemnasir').split(',').map(b => b.trim());\n\nconst items = $input.all();\nconst claudeText = items[0]?.json?.content?.[0]?.text || '';\nconst openaiText = items[1]?.json?.choices?.[0]?.message?.content || '';\nconst pplxText = items[2]?.json?.choices?.[0]?.message?.content || '';\nconst geminiText = items[3]?.json?.candidates?.[0]?.content?.parts?.[0]?.text || '';\n\nconst llms = { claude: claudeText, chatgpt: openaiText, perplexity: pplxText, gemini: geminiText };\nconst results = [];\n\nfor (const [llm, text] of Object.entries(llms)) {\n  for (const brand of brands) {\n    const re = new RegExp(brand.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&'), 'i');\n    const match = text.match(re);\n    const pos = match ? text.toLowerCase().indexOf(brand.toLowerCase()) : -1;\n    const cited = pos >= 0;\n    results.push({\n      checked_at: new Date().toISOString(),\n      prompt: promptItem.prompt,\n      llm,\n      brand,\n      cited,\n      char_position: pos,\n      answer_length: text.length,\n      snippet: cited ? text.substring(Math.max(0, pos - 80), pos + 160) : ''\n    });\n  }\n}\n\nreturn results.map(json => ({ json }));"
+      },
+      "id": "parse-citations",
+      "name": "Parse citations",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 400]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {"__rl": true, "value": "REPLACE_ME_SHEET_ID", "mode": "id"},
+        "sheetName": {"__rl": true, "value": "log", "mode": "name"},
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "checked_at": "={{ $json.checked_at }}",
+            "prompt": "={{ $json.prompt }}",
+            "llm": "={{ $json.llm }}",
+            "brand": "={{ $json.brand }}",
+            "cited": "={{ $json.cited }}",
+            "char_position": "={{ $json.char_position }}",
+            "answer_length": "={{ $json.answer_length }}",
+            "snippet": "={{ $json.snippet }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-row",
+      "name": "Log every row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1520, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "REPLACE_ME_GSHEETS", "name": "Google Sheets OAuth"}
+      }
+    },
+    {
+      "parameters": {
+        "channel": "#aeo-alerts",
+        "text": "=📊 AEO daily — {{ new Date().toDateString() }}\n\nPrompt: _{{ $json.prompt }}_\nBrand: *{{ $json.brand }}* — {{ $json.llm }}\nCited: {{ $json.cited ? '✅ position ' + $json.char_position : '❌ not cited' }}\n\n{{ $json.cited ? '> ' + $json.snippet : '' }}",
+        "otherOptions": {}
+      },
+      "id": "slack-notify",
+      "name": "Slack daily digest",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1740, 400],
+      "credentials": {
+        "slackApi": {"id": "REPLACE_ME_SLACK", "name": "Slack OAuth"}
+      }
+    }
+  ],
+  "connections": {
+    "Daily 6am": {"main": [[{"node": "Read 30 prompts", "type": "main", "index": 0}]]},
+    "Read 30 prompts": {"main": [[{"node": "Split each prompt", "type": "main", "index": 0}]]},
+    "Split each prompt": {
+      "main": [[
+        {"node": "Claude answer", "type": "main", "index": 0},
+        {"node": "ChatGPT answer", "type": "main", "index": 0},
+        {"node": "Perplexity answer", "type": "main", "index": 0},
+        {"node": "Gemini answer", "type": "main", "index": 0}
+      ]]
+    },
+    "Claude answer": {"main": [[{"node": "Merge 4 answers", "type": "main", "index": 0}]]},
+    "ChatGPT answer": {"main": [[{"node": "Merge 4 answers", "type": "main", "index": 1}]]},
+    "Perplexity answer": {"main": [[{"node": "Merge 4 answers", "type": "main", "index": 2}]]},
+    "Gemini answer": {"main": [[{"node": "Merge 4 answers", "type": "main", "index": 3}]]},
+    "Merge 4 answers": {"main": [[{"node": "Parse citations", "type": "main", "index": 0}]]},
+    "Parse citations": {"main": [[{"node": "Log every row", "type": "main", "index": 0}]]},
+    "Log every row": {"main": [[{"node": "Slack daily digest", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"},
+  "meta": {
+    "templateId": "skynetlabs-06",
+    "instanceId": "REPLACE_ME"
+  },
+  "tags": [{"name": "skynetlabs-pack"}, {"name": "aeo"}, {"name": "citation-monitor"}]
+}

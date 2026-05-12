@@ -1,0 +1,202 @@
+{
+  "name": "05 - Voice-Note Follow-up (ElevenLabs)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "call-ended",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-call",
+      "name": "Cal.com call-ended",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "amount": 90,
+        "unit": "minutes"
+      },
+      "id": "wait",
+      "name": "Wait 90 min",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.fireflies.ai/graphql",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"query\": \"query Transcript($id: String!) { transcript(id: $id) { id title summary { overview } sentences { text speaker_name } } }\",\n  \"variables\": { \"id\": \"{{ $('Cal.com call-ended').item.json.body.transcript_id }}\" }\n}",
+        "options": {}
+      },
+      "id": "fetch-transcript",
+      "name": "Fetch transcript",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME_FIREFLIES",
+          "name": "Fireflies API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-sonnet-4-6",
+          "mode": "list"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You write a 25-second WhatsApp voice-note follow-up after a discovery call.\n\nMY OFFER: SkynetLabs automation + AEO retainers ($1.5K-5K/mo) and Fiverr builds ($297-997).\n\nCALL DETAILS:\nLead name: {{ $('Cal.com call-ended').item.json.body.attendee_name }}\nCall transcript summary: {{ $json.data?.transcript?.summary?.overview || 'no summary available' }}\nKey moments (first 8 sentences):\n{{ JSON.stringify(($json.data?.transcript?.sentences || []).slice(0, 8)) }}\n\nWrite a voice-note SCRIPT in MY voice. Direct, warm, no buzzwords. Structure:\n1. Quick acknowledgement of one specific thing they said (15 words)\n2. One observation or idea I had after the call (25 words)\n3. Soft next step (10 words)\n\nTarget 65-75 words total. Speak it out loud — no bullet points, no headers, plain text only.\n\nReturn ONLY the script as plain text. No quotes, no JSON wrapper.",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.6,
+          "maxTokens": 400
+        }
+      },
+      "id": "claude-script",
+      "name": "Claude write 25s script",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1.2,
+      "position": [860, 300],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_ME_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.elevenlabs.io/v1/text-to-speech/{{ $env.ELEVENLABS_VOICE_ID }}",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": {{ JSON.stringify($json.content?.[0]?.text || $json.text || '') }},\n  \"model_id\": \"eleven_turbo_v2_5\",\n  \"voice_settings\": { \"stability\": 0.55, \"similarity_boost\": 0.8, \"style\": 0.2 }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "elevenlabs-tts",
+      "name": "ElevenLabs TTS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1080, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME_ELEVENLABS",
+          "name": "ElevenLabs API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "name": "=voice-{{ $('Cal.com call-ended').item.json.body.attendee_email }}-{{ Date.now() }}.mp3",
+        "driveId": {"__rl": true, "value": "REPLACE_ME_DRIVE_ID", "mode": "id"},
+        "folderId": {"__rl": true, "value": "REPLACE_ME_VOICE_FOLDER_ID", "mode": "id"},
+        "options": {}
+      },
+      "id": "drive-upload",
+      "name": "Upload MP3 to Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1300, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_ME_GDRIVE",
+          "name": "Google Drive OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://graph.facebook.com/v20.0/{{ $env.WA_PHONE_NUMBER_ID }}/messages",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ $('Cal.com call-ended').item.json.body.attendee_phone }}\",\n  \"type\": \"audio\",\n  \"audio\": { \"link\": \"{{ $json.webViewLink }}\" }\n}",
+        "options": {}
+      },
+      "id": "wa-send",
+      "name": "WhatsApp send",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1520, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME_WA_TOKEN",
+          "name": "WhatsApp Cloud API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {"__rl": true, "value": "REPLACE_ME_SHEET_ID", "mode": "id"},
+        "sheetName": {"__rl": true, "value": "voice-followups", "mode": "name"},
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "sent_at": "={{ new Date().toISOString() }}",
+            "attendee_name": "={{ $('Cal.com call-ended').item.json.body.attendee_name }}",
+            "attendee_email": "={{ $('Cal.com call-ended').item.json.body.attendee_email }}",
+            "attendee_phone": "={{ $('Cal.com call-ended').item.json.body.attendee_phone }}",
+            "script": "={{ $('Claude write 25s script').item.json.content?.[0]?.text }}",
+            "mp3_url": "={{ $('Upload MP3 to Drive').item.json.webViewLink }}",
+            "wa_message_id": "={{ $json.messages?.[0]?.id }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log",
+      "name": "Log to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1740, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME_GSHEETS",
+          "name": "Google Sheets OAuth"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cal.com call-ended": {"main": [[{"node": "Wait 90 min", "type": "main", "index": 0}]]},
+    "Wait 90 min": {"main": [[{"node": "Fetch transcript", "type": "main", "index": 0}]]},
+    "Fetch transcript": {"main": [[{"node": "Claude write 25s script", "type": "main", "index": 0}]]},
+    "Claude write 25s script": {"main": [[{"node": "ElevenLabs TTS", "type": "main", "index": 0}]]},
+    "ElevenLabs TTS": {"main": [[{"node": "Upload MP3 to Drive", "type": "main", "index": 0}]]},
+    "Upload MP3 to Drive": {"main": [[{"node": "WhatsApp send", "type": "main", "index": 0}]]},
+    "WhatsApp send": {"main": [[{"node": "Log to Sheet", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"},
+  "meta": {
+    "templateId": "skynetlabs-05",
+    "instanceId": "REPLACE_ME"
+  },
+  "tags": [{"name": "skynetlabs-pack"}, {"name": "voice-followup"}, {"name": "elevenlabs"}]
+}

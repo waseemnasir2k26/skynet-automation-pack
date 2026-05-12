@@ -1,0 +1,243 @@
+{
+  "name": "01 - LinkedIn DM ICP Scorer",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "trigger-cron",
+      "name": "Every hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.unipile.com/api/v1/chats",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "account_id",
+              "value": "={{ $env.UNIPILE_LINKEDIN_ACCOUNT_ID }}"
+            },
+            {
+              "name": "unread",
+              "value": "true"
+            },
+            {
+              "name": "limit",
+              "value": "20"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fetch-dms",
+      "name": "Fetch unread LI DMs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME_UNIPILE_HEADER",
+          "name": "Unipile API Header"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "items",
+        "options": {}
+      },
+      "id": "split-items",
+      "name": "Split each DM",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.unipile.com/api/v1/users/{{ $json.attendee_provider_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "account_id",
+              "value": "={{ $env.UNIPILE_LINKEDIN_ACCOUNT_ID }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fetch-profile",
+      "name": "Fetch sender profile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME_UNIPILE_HEADER",
+          "name": "Unipile API Header"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-sonnet-4-6",
+          "mode": "list"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are an ICP scorer for SkynetLabs, an AEO/automation agency.\n\nMY ICP:\n- Founders or marketing leads at agencies / SaaS / clinics / e-com brands\n- Revenue $500K-$10M/year\n- Already use some automation (Zapier/Make/n8n) OR actively shopping for it\n- Pain: lead qualification, content ops, or AI search visibility\n\nNOT ICP:\n- Job seekers, recruiters, students\n- Crypto/MLM pitches\n- People selling TO me (other agencies pitching)\n- C-suite at Fortune 500 (out of price band)\n\nLI profile JSON:\n{{ JSON.stringify($json) }}\n\nDM message:\n{{ $('Split each DM').item.json.last_message_text }}\n\nReturn ONLY valid JSON:\n{\n  \"icp_score\": 0-100,\n  \"tier\": \"hot|warm|cold|reject\",\n  \"reason\": \"one-sentence why\",\n  \"suggested_reply\": \"60-word reply matching their context, or 'SKIP' if reject\",\n  \"tags\": [\"agency\", \"saas\", \"clinic\", \"ecom\", \"other\"]\n}",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 800
+        }
+      },
+      "id": "claude-score",
+      "name": "Claude — ICP score",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1.2,
+      "position": [1080, 300],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_ME_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.content?.[0]?.text || $input.first().json.text || '';\nconst match = raw.match(/\\{[\\s\\S]*\\}/);\nif (!match) throw new Error('No JSON in Claude reply');\nconst parsed = JSON.parse(match[0]);\nconst profile = $('Fetch sender profile').first().json;\nconst dm = $('Split each DM').first().json;\nreturn [{\n  json: {\n    ...parsed,\n    sender_name: profile.name || profile.first_name + ' ' + profile.last_name,\n    sender_headline: profile.headline,\n    sender_company: profile.company,\n    sender_url: profile.public_profile_url,\n    dm_text: dm.last_message_text,\n    chat_id: dm.id,\n    scored_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "parse-score",
+      "name": "Parse + enrich",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.icp_score }}",
+              "rightValue": 70,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ]
+        }
+      },
+      "id": "if-hot",
+      "name": "If score >= 70",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1520, 300]
+    },
+    {
+      "parameters": {
+        "channel": "#li-hot-leads",
+        "text": "=🔥 *{{ $json.tier.toUpperCase() }} LEAD* — score {{ $json.icp_score }}/100\n\n*{{ $json.sender_name }}* — {{ $json.sender_headline }}\n{{ $json.sender_url }}\n\n*Their DM:*\n> {{ $json.dm_text }}\n\n*Why:* {{ $json.reason }}\n\n*Suggested reply:*\n```\n{{ $json.suggested_reply }}\n```\n\nReact :white_check_mark: to send, :x: to skip.",
+        "otherOptions": {}
+      },
+      "id": "slack-hot",
+      "name": "Slack hot alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1740, 200],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_ME_SLACK",
+          "name": "Slack OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_ME_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "li-icp-log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "scored_at": "={{ $json.scored_at }}",
+            "sender_name": "={{ $json.sender_name }}",
+            "sender_url": "={{ $json.sender_url }}",
+            "icp_score": "={{ $json.icp_score }}",
+            "tier": "={{ $json.tier }}",
+            "reason": "={{ $json.reason }}",
+            "dm_text": "={{ $json.dm_text }}",
+            "tags": "={{ $json.tags.join(',') }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheets-log",
+      "name": "Log all to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1740, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME_GSHEETS",
+          "name": "Google Sheets OAuth"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every hour": { "main": [[{ "node": "Fetch unread LI DMs", "type": "main", "index": 0 }]] },
+    "Fetch unread LI DMs": { "main": [[{ "node": "Split each DM", "type": "main", "index": 0 }]] },
+    "Split each DM": { "main": [[{ "node": "Fetch sender profile", "type": "main", "index": 0 }]] },
+    "Fetch sender profile": { "main": [[{ "node": "Claude — ICP score", "type": "main", "index": 0 }]] },
+    "Claude — ICP score": { "main": [[{ "node": "Parse + enrich", "type": "main", "index": 0 }]] },
+    "Parse + enrich": { "main": [[{ "node": "If score >= 70", "type": "main", "index": 0 }]] },
+    "If score >= 70": {
+      "main": [
+        [{ "node": "Slack hot alert", "type": "main", "index": 0 }, { "node": "Log all to Sheet", "type": "main", "index": 0 }],
+        [{ "node": "Log all to Sheet", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "templateId": "skynetlabs-01",
+    "instanceId": "REPLACE_ME"
+  },
+  "tags": [{"name": "skynetlabs-pack"}, {"name": "linkedin"}, {"name": "lead-scoring"}]
+}

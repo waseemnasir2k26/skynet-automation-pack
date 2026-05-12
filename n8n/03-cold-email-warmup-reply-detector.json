@@ -1,0 +1,177 @@
+{
+  "name": "03 - Cold Email Warm-up + Reply Detector",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {"field": "minutes", "minutesInterval": 15}
+          ]
+        }
+      },
+      "id": "trigger-cron",
+      "name": "Every 15 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "format": "simple",
+        "options": {
+          "customEmailConfig": "[\"UNSEEN\"]"
+        }
+      },
+      "id": "imap-fetch",
+      "name": "Fetch new replies (IMAP)",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2,
+      "position": [420, 300],
+      "credentials": {
+        "imap": {
+          "id": "REPLACE_ME_IMAP",
+          "name": "Sending inbox IMAP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-sonnet-4-6",
+          "mode": "list"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You classify replies to cold email outreach for SkynetLabs.\n\nMY OFFER: Automation + AEO retainers and one-off Fiverr builds ($297-997 builds, $1.5K-5K retainers).\n\nClassify the reply into ONE category:\n- HOT: positive intent, asking for call/pricing/next step\n- WARM: 'maybe later', 'send more info', 'not now but Q3'\n- COLD: polite no\n- OOO: out-of-office auto-reply\n- BOUNCE: mail server bounce / undeliverable\n- UNSUB: asked to be removed\n- HOSTILE: complaint, spam threat, legal\n- OTHER: not interpretable\n\nReply subject:\n{{ $json.subject }}\n\nReply body (first 1500 chars):\n{{ $json.text?.substring(0, 1500) || $json.textHtml?.substring(0, 1500) || '' }}\n\nFrom:\n{{ $json.from }}\n\nReturn ONLY valid JSON:\n{\n  \"classification\": \"HOT|WARM|COLD|OOO|BOUNCE|UNSUB|HOSTILE|OTHER\",\n  \"intent_score\": 0-100,\n  \"reason\": \"one-sentence why\",\n  \"suggested_reply\": \"60-word reply OR 'PAUSE_SEQUENCE' if HOT/UNSUB/HOSTILE, or 'SKIP' otherwise\",\n  \"resume_in_days\": null\n}",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.2,
+          "maxTokens": 600
+        }
+      },
+      "id": "claude-classify",
+      "name": "Claude classify",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1.2,
+      "position": [640, 300],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_ME_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.content?.[0]?.text || $input.first().json.text || '';\nconst match = raw.match(/\\{[\\s\\S]*\\}/);\nif (!match) throw new Error('No JSON in Claude reply');\nconst parsed = JSON.parse(match[0]);\nconst email = $('Fetch new replies (IMAP)').first().json;\nreturn [{\n  json: {\n    ...parsed,\n    from: email.from,\n    subject: email.subject,\n    received_at: email.date || new Date().toISOString(),\n    snippet: (email.text || email.textHtml || '').substring(0, 300)\n  }\n}];"
+      },
+      "id": "parse",
+      "name": "Parse + merge",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {"conditions": {"options": {"caseSensitive": true}, "conditions": [{"leftValue": "={{ $json.classification }}", "rightValue": "HOT", "operator": {"type": "string", "operation": "equals"}}]}, "outputKey": "hot"},
+            {"conditions": {"options": {"caseSensitive": true}, "conditions": [{"leftValue": "={{ $json.classification }}", "rightValue": "WARM", "operator": {"type": "string", "operation": "equals"}}]}, "outputKey": "warm"},
+            {"conditions": {"options": {"caseSensitive": true}, "conditions": [{"leftValue": "={{ $json.classification }}", "rightValue": "BOUNCE", "operator": {"type": "string", "operation": "equals"}}]}, "outputKey": "bounce_or_unsub"},
+            {"conditions": {"options": {"caseSensitive": true}, "conditions": [{"leftValue": "={{ $json.classification }}", "rightValue": "UNSUB", "operator": {"type": "string", "operation": "equals"}}]}, "outputKey": "bounce_or_unsub"}
+          ]
+        },
+        "options": {"fallbackOutput": "extra"}
+      },
+      "id": "switch-class",
+      "name": "Route by class",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [1080, 300]
+    },
+    {
+      "parameters": {
+        "channel": "#cold-email-hot",
+        "text": "=🔥 *HOT REPLY* — intent {{ $json.intent_score }}/100\n\n*From:* {{ $json.from }}\n*Subject:* {{ $json.subject }}\n\n*Snippet:*\n> {{ $json.snippet }}\n\n*Why:* {{ $json.reason }}\n\n*Suggested reply:*\n```\n{{ $json.suggested_reply }}\n```\n\n⚠️ Sequence has been flagged to pause for this contact in the Sheet.",
+        "otherOptions": {}
+      },
+      "id": "slack-hot",
+      "name": "Slack hot ping",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1300, 100],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_ME_SLACK",
+          "name": "Slack OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_ME_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "reply-log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "received_at": "={{ $json.received_at }}",
+            "from": "={{ $json.from }}",
+            "subject": "={{ $json.subject }}",
+            "classification": "={{ $json.classification }}",
+            "intent_score": "={{ $json.intent_score }}",
+            "reason": "={{ $json.reason }}",
+            "suggested_reply": "={{ $json.suggested_reply }}",
+            "snippet": "={{ $json.snippet }}",
+            "next_action": "={{ $json.classification === 'HOT' ? 'pause_seq + reply' : $json.classification === 'UNSUB' ? 'remove_from_list' : 'log_only' }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheets-log",
+      "name": "Log every reply",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1300, 500],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME_GSHEETS",
+          "name": "Google Sheets OAuth"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 15 min": {"main": [[{"node": "Fetch new replies (IMAP)", "type": "main", "index": 0}]]},
+    "Fetch new replies (IMAP)": {"main": [[{"node": "Claude classify", "type": "main", "index": 0}]]},
+    "Claude classify": {"main": [[{"node": "Parse + merge", "type": "main", "index": 0}]]},
+    "Parse + merge": {"main": [[{"node": "Route by class", "type": "main", "index": 0}]]},
+    "Route by class": {
+      "main": [
+        [{"node": "Slack hot ping", "type": "main", "index": 0}, {"node": "Log every reply", "type": "main", "index": 0}],
+        [{"node": "Log every reply", "type": "main", "index": 0}],
+        [{"node": "Log every reply", "type": "main", "index": 0}],
+        [{"node": "Log every reply", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "settings": {"executionOrder": "v1"},
+  "meta": {
+    "templateId": "skynetlabs-03",
+    "instanceId": "REPLACE_ME"
+  },
+  "tags": [{"name": "skynetlabs-pack"}, {"name": "cold-email"}, {"name": "reply-classifier"}]
+}

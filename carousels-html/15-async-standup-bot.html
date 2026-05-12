@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1180, initial-scale=1">
+<title>Async Standup Bot — 10-slide carousel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400;1,9..144,500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: #07090f;
+  color: #f4eee0;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.preview-wrap {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 40px 20px 120px;
+}
+.preview-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 32px;
+  padding: 24px 28px;
+  border: 1px solid rgba(212, 165, 116, 0.25);
+  background: #0a0e1a;
+  border-radius: 0;
+}
+.preview-head h1 {
+  font-family: 'Fraunces', serif;
+  font-weight: 600;
+  font-size: 22px;
+  color: #f4eee0;
+  letter-spacing: -0.01em;
+}
+.preview-head .meta {
+  color: #8a9ab8;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+button.download-all {
+  background: #d4a574;
+  color: #0a0e1a;
+  border: 0;
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 14px 22px;
+  cursor: pointer;
+  border-radius: 0;
+}
+button.download-all:hover { background: #e3b787; }
+button.download-all:disabled { opacity: 0.5; cursor: wait; }
+
+/* Slide canvas */
+.slide {
+  width: 1080px;
+  height: 1350px;
+  margin: 0 auto 40px;
+  background: #0a0e1a;
+  position: relative;
+  overflow: hidden;
+  /* Scale-to-fit on smaller screens so preview is usable */
+  transform-origin: top center;
+}
+@media (max-width: 1180px) {
+  .slide { transform: scale(0.7); margin-bottom: -360px; }
+  .slide:last-of-type { margin-bottom: 40px; }
+}
+.slide-inner {
+  position: absolute;
+  inset: 0;
+  padding: 80px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.slide-meta {
+  position: absolute;
+  top: 56px;
+  right: 80px;
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  color: #8a9ab8;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.brand-foot {
+  position: absolute;
+  bottom: 56px;
+  left: 80px;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  color: #8a9ab8;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+/* gold corner accent */
+.slide-inner::before {
+  content: "";
+  position: absolute;
+  top: 56px;
+  left: 80px;
+  width: 56px;
+  height: 2px;
+  background: #d4a574;
+}
+.slide-inner::after {
+  content: "";
+  position: absolute;
+  bottom: 56px;
+  right: 80px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #d4a574;
+  border-radius: 50%;
+}
+
+/* Shared elements */
+.chip {
+  display: inline-block;
+  font-family: 'Inter', sans-serif;
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #d4a574;
+  border: 1px solid rgba(212, 165, 116, 0.4);
+  padding: 10px 18px;
+  margin-bottom: 38px;
+  align-self: flex-start;
+}
+.chip.cta-chip {
+  background: rgba(212, 165, 116, 0.08);
+  color: #e8c389;
+}
+.gold-rule {
+  width: 120px;
+  height: 2px;
+  background: #d4a574;
+  margin: 32px 0;
+}
+.headline {
+  font-family: 'Fraunces', serif;
+  font-weight: 500;
+  font-size: 84px;
+  line-height: 1.02;
+  letter-spacing: -0.015em;
+  color: #f4eee0;
+  max-width: 880px;
+}
+.headline.reveal {
+  font-style: italic;
+  font-size: 64px;
+  line-height: 1.08;
+}
+.headline.setup { font-size: 92px; }
+
+/* Slide 1 - Hook */
+.hook {
+  font-family: 'Fraunces', serif;
+  font-weight: 500;
+  font-size: 92px;
+  line-height: 1.0;
+  letter-spacing: -0.018em;
+  color: #f4eee0;
+  max-width: 880px;
+}
+.subhook {
+  font-family: 'Inter', sans-serif;
+  font-size: 24px;
+  line-height: 1.45;
+  color: #8a9ab8;
+  max-width: 780px;
+  margin-top: 12px;
+}
+
+/* Slide 2 & 7 - Big stat */
+.big-stat {
+  font-family: 'Fraunces', serif;
+  font-weight: 500;
+  font-size: 220px;
+  line-height: 0.92;
+  letter-spacing: -0.04em;
+  color: #d4a574;
+}
+.big-stat.cost { font-size: 200px; }
+.big-stat-lbl {
+  font-family: 'Inter', sans-serif;
+  font-size: 28px;
+  letter-spacing: 0.04em;
+  color: #f4eee0;
+  margin-top: 12px;
+  max-width: 720px;
+}
+.secondary-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin-top: 8px;
+}
+.ss-num {
+  font-family: 'Fraunces', serif;
+  font-size: 64px;
+  color: #f4eee0;
+  font-weight: 500;
+}
+.ss-lbl {
+  font-family: 'Inter', sans-serif;
+  font-size: 22px;
+  color: #8a9ab8;
+}
+
+/* Slide 3 - Old way fails */
+.fail-list {
+  list-style: none;
+  margin-top: 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+.fail-list li {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  font-family: 'Inter', sans-serif;
+  font-size: 34px;
+  font-weight: 400;
+  color: #f4eee0;
+  letter-spacing: -0.01em;
+}
+.fail-list .dot {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #d4a574;
+}
+
+/* Slide 4 - Reveal */
+.workflow-name {
+  margin-top: 56px;
+  border-top: 1px solid rgba(212, 165, 116, 0.3);
+  padding-top: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wn-label {
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #8a9ab8;
+}
+.wn-title {
+  font-family: 'Fraunces', serif;
+  font-size: 48px;
+  font-weight: 500;
+  color: #d4a574;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+
+/* Slide 5 - Stack grid */
+.stack-grid {
+  margin-top: 48px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  max-width: 920px;
+}
+.stack-cell {
+  background: rgba(212, 165, 116, 0.06);
+  border: 1px solid rgba(212, 165, 116, 0.22);
+  padding: 24px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sc-layer {
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #d4a574;
+}
+.sc-tool {
+  font-family: 'Fraunces', serif;
+  font-size: 24px;
+  font-weight: 500;
+  color: #f4eee0;
+  line-height: 1.2;
+}
+
+/* Slide 6 - Flow */
+.flow-wrap {
+  margin-top: 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.flow-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.flow-node {
+  background: rgba(244, 238, 224, 0.05);
+  border: 1px solid rgba(244, 238, 224, 0.18);
+  padding: 16px 22px;
+  font-family: 'Inter', sans-serif;
+  font-size: 22px;
+  color: #f4eee0;
+  font-weight: 500;
+}
+.flow-node.accent {
+  background: #d4a574;
+  border-color: #d4a574;
+  color: #0a0e1a;
+  font-weight: 600;
+}
+.flow-arrow {
+  font-family: 'Fraunces', serif;
+  font-size: 30px;
+  color: #d4a574;
+  padding: 0 4px;
+}
+.flow-empty {
+  font-family: 'Fraunces', serif;
+  font-size: 42px;
+  color: #f4eee0;
+}
+
+/* Slide 7 breakdown */
+.breakdown {
+  margin-top: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 700px;
+}
+.bd-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border-bottom: 1px solid rgba(244, 238, 224, 0.12);
+  padding: 10px 0;
+}
+.bd-layer {
+  font-family: 'Inter', sans-serif;
+  font-size: 22px;
+  color: #f4eee0;
+}
+.bd-cost {
+  font-family: 'Fraunces', serif;
+  font-size: 24px;
+  color: #d4a574;
+  font-weight: 500;
+}
+
+/* Slide 8 skill-level */
+.skill-level {
+  margin-top: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 820px;
+}
+.sl-label {
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #8a9ab8;
+}
+.sl-body {
+  font-family: 'Inter', sans-serif;
+  font-size: 24px;
+  line-height: 1.45;
+  color: #f4eee0;
+}
+
+/* Slide 9 outcomes */
+.outcome-list {
+  list-style: none;
+  margin-top: 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+}
+.outcome-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 22px;
+}
+.check {
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: #0a0e1a;
+  background: #d4a574;
+  margin-top: 4px;
+  font-weight: 700;
+}
+.out-text {
+  font-family: 'Fraunces', serif;
+  font-size: 36px;
+  line-height: 1.2;
+  color: #f4eee0;
+  font-weight: 500;
+}
+
+/* Slide 10 CTA */
+.cta-keyword-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+.cta-lead {
+  font-family: 'Fraunces', serif;
+  font-size: 56px;
+  font-style: italic;
+  color: #f4eee0;
+  font-weight: 400;
+}
+.cta-keyword {
+  font-family: 'Fraunces', serif;
+  font-size: 168px;
+  font-weight: 600;
+  color: #d4a574;
+  line-height: 1.0;
+  letter-spacing: -0.02em;
+}
+.cta-sub {
+  font-family: 'Inter', sans-serif;
+  font-size: 24px;
+  color: #8a9ab8;
+  max-width: 720px;
+  margin-top: 20px;
+}
+.cta-credit {
+  margin-top: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cc-name {
+  font-family: 'Fraunces', serif;
+  font-size: 30px;
+  font-weight: 600;
+  color: #f4eee0;
+}
+.cc-brand {
+  font-family: 'Inter', sans-serif;
+  font-size: 16px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #d4a574;
+}
+</style>
+</head>
+<body>
+<div class="preview-wrap">
+  <div class="preview-head">
+    <div>
+      <h1>Async Standup Bot</h1>
+      <div class="meta">Productivity · Agency &middot; keyword <strong>STAND</strong> &middot; 10 slides &middot; 1080 &times; 1350</div>
+    </div>
+    <button class="download-all" id="dl-btn" type="button">Download All 10 Slides</button>
+  </div>
+  <section class='slide' id='slide-1'><div class='slide-inner'><div class='slide-meta'><span class='num'>01 / 10</span></div><div class='brand-foot'>SkynetLabs &middot; skynetjoe.com</div>
+<div class='chip'>Productivity · Agency</div><h1 class='hook'>Daily standups eat the calendar and miss the blockers?</h1><div class='gold-rule'></div><div class='subhook'>9:30am every weekday, a Slack DM asks each teammate three questions. By 10:15 you have a single threaded recap in #standup, blockers flagged in red.</div>
+</div></section>
+<section class='slide' id='slide-2'><div class='slide-inner'><div class='slide-meta'><span class='num'>02 / 10</span></div><div class='brand-foot'>SkynetLabs &middot; skynetjoe.com</div>
+<div class='chip'>The cost of doing nothing</div><div class='big-stat'>13 hrs</div><div class='big-stat-lbl'>Payroll burned / week on standup</div><div class='gold-rule'></div><div class='secondary-stat'><span class='ss-num'>100%</span><span class='ss-lbl'>Blockers captured in text</span></div>
+</div></section>
+<section class='slide' id='slide-3'><div class='slide-inner'><div class='slide-meta'><span class='num'>03 / 10</span></div><div class='brand-foot'>SkynetLabs &middot; skynetjoe.com</div>
+<div class='chip'>Why the old fixes fail</div><h2 class='headline'>None of these scale.</h2><ul class='fail-list'><li><span class='dot'></span>Doing it by hand every day.</li><li><span class='dot'></span>Hiring a VA to babysit the inbox.</li><li><span class='dot'></span>Buying a $400/mo SaaS that does 30% of it.</li></ul>
+</div></section>
+<section class='slide' id='slide-4'><div class='slide-inner'><div class='slide-meta'><span class='num'>04 / 10</span></div><div class='brand-foot'>SkynetLabs &middot; skynetjoe.com</div>
+<div class='chip'>What if &hellip;</div><h2 class='headline reveal'>An LLM read every one in 6 seconds, scored it, and pinged you only when it mattered?</h2><div class='workflow-name'><span class='wn-label'>Workflow</span><span class='wn-title'>Async Standup Bot</span></div>
+</div></section>
+<section class='slide' id='slide-5'><div class='slide-inner'><div class='slide-meta'><span class='num'>05 / 10</span></div><div class='brand-foot'>SkynetLabs &middot; skynetjoe.com</div>
+<div class='chip'>The Stack</div><h2 class='headline'>Four pieces. Nothing exotic.</h2><div class='stack-grid'><div class='stack-cell'><span class='sc-layer'>Orchestration</span><span class='sc-tool'>n8n (self-host / cloud)</span></div><div class='stack-cell'><span class='sc-layer'>Chat surface</span><span class='sc-tool'>Slack bot (free tier OK)</span></div><div class='stack-cell'><span class='sc-layer'>LLM summary</span><span class='sc-tool'>Claude Sonnet 4.6</span></div><div class='stack-cell'><span class='sc-layer'>Roster store</span><span class='sc-tool'>Google Sheets (team roster tab)</span></div></div>
+</div></section>
+<section class='slide' id='slide-6'><div class='slide-inner'><div class='slide-meta'><span class='num'>06 / 10</span></div><div class='brand-foot'>SkynetLabs &middot; skynetjoe.com</div>
+<div class='chip'>The Flow</div><h2 class='headline'>Cron fires. Claude decides. You get pinged.</h2><div class='flow-wrap'><div class='flow-row'><div class='flow-node'>Cron 9:30 weekday</div><span class='flow-arrow'>→</span><div class='flow-node'>Loop team</div><span class='flow-arrow'>→</span><div class='flow-node'>Slack DM ask</div></div><div class='flow-row'><span class='flow-arrow'>↓</span></div><div class='flow-row'><div class='flow-node'>Wait 45m</div><span class='flow-arrow'>→</span><div class='flow-node accent'>Claude summarise</div><span class='flow-arrow'>→</span><div class='flow-node'>Post + flag</div></div></div>
+</div></section>
+<section class='slide' id='slide-7'><div class='slide-inner'><div class='slide-meta'><span class='num'>07 / 10</span></div><div class='brand-foot'>SkynetLabs &middot; skynetjoe.com</div>
+<div class='chip'>Monthly Run Cost</div><div class='big-stat cost'>$8-26/mo</div><div class='big-stat-lbl'>All-in. APIs &amp; hosting.</div><div class='gold-rule'></div><div class='breakdown'><div class='bd-row'><span class='bd-layer'>Orchestration</span><span class='bd-cost'>$6-20</span></div><div class='bd-row'><span class='bd-layer'>Chat surface</span><span class='bd-cost'>$0</span></div><div class='bd-row'><span class='bd-layer'>LLM summary</span><span class='bd-cost'>$2-6</span></div><div class='bd-row'><span class='bd-layer'>Roster store</span><span class='bd-cost'>$0</span></div></div>
+</div></section>
+<section class='slide' id='slide-8'><div class='slide-inner'><div class='slide-meta'><span class='num'>08 / 10</span></div><div class='brand-foot'>SkynetLabs &middot; skynetjoe.com</div>
+<div class='chip'>Setup Time</div><h2 class='headline setup'>45-75 min fresh, 20 min if n8n is already wired</h2><div class='gold-rule'></div><div class='skill-level'><span class='sl-label'>Skill level</span><span class='sl-body'>Beginner. Slack app build is the only fiddly bit, plus pasting credentials.</span></div>
+</div></section>
+<section class='slide' id='slide-9'><div class='slide-inner'><div class='slide-meta'><span class='num'>09 / 10</span></div><div class='brand-foot'>SkynetLabs &middot; skynetjoe.com</div>
+<div class='chip'>What you walk away with</div><h2 class='headline'>Three outcomes. Same day.</h2><ul class='outcome-list'><li><span class='check'>&#10003;</span><span class='out-text'>Stop bleeding payroll burned / week on standup.</span></li><li><span class='check'>&#10003;</span><span class='out-text'>Cut blockers captured in text on autopilot.</span></li><li><span class='check'>&#10003;</span><span class='out-text'>Built for Remote agencies + studios.</span></li></ul>
+</div></section>
+<section class='slide' id='slide-10'><div class='slide-inner'><div class='slide-meta'><span class='num'>10 / 10</span></div><div class='brand-foot'>SkynetLabs &middot; skynetjoe.com</div>
+<div class='chip cta-chip'>Free PDF + n8n JSON</div><div class='cta-keyword-wrap'><div class='cta-lead'>Comment</div><div class='cta-keyword'>STAND</div><div class='cta-lead'>below.</div></div><div class='cta-sub'>I&rsquo;ll DM you the PDF + importable workflow.</div><div class='gold-rule'></div><div class='cta-credit'><span class='cc-name'>Waseem Nasir</span><span class='cc-brand'>SkynetLabs &middot; skynetjoe.com</span></div>
+</div></section>
+</div>
+<script>
+(function () {
+  var btn = document.getElementById('dl-btn');
+  if (!btn) return;
+  btn.addEventListener('click', async function () {
+    btn.disabled = true;
+    var original = btn.textContent;
+    var slides = document.querySelectorAll('.slide');
+    for (var i = 0; i < slides.length; i++) {
+      var node = slides[i];
+      btn.textContent = 'Rendering ' + (i + 1) + ' / ' + slides.length + ' ...';
+      // Force scale 1 during render so html2canvas captures native 1080x1350.
+      var prevTransform = node.style.transform;
+      node.style.transform = 'scale(1)';
+      try {
+        var canvas = await html2canvas(node, {
+          width: 1080,
+          height: 1350,
+          scale: 1,
+          backgroundColor: '#0a0e1a',
+          useCORS: true,
+          allowTaint: false,
+          logging: false
+        });
+        var dataUrl = canvas.toDataURL('image/png');
+        var a = document.createElement('a');
+        a.href = dataUrl;
+        a.download = 'async-standup-bot_slide_' + String(i + 1).padStart(2, '0') + '.png';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        await new Promise(function (r) { setTimeout(r, 250); });
+      } catch (err) {
+        console.error('slide ' + (i + 1) + ' failed:', err);
+      } finally {
+        node.style.transform = prevTransform;
+      }
+    }
+    btn.textContent = original;
+    btn.disabled = false;
+  });
+})();
+</script>
+</body>
+</html>

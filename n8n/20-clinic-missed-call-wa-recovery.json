@@ -1,0 +1,175 @@
+{
+  "name": "20 - Clinic Missed Call WA Recovery",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "twilio-missed-call",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-call",
+      "name": "Twilio status webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "typeValidation": "strict"},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.body.CallStatus }}",
+              "rightValue": "no-answer",
+              "operator": {"type": "string", "operation": "equals"}
+            },
+            {
+              "leftValue": "={{ $json.body.Direction }}",
+              "rightValue": "inbound",
+              "operator": {"type": "string", "operation": "equals"}
+            }
+          ],
+          "combinator": "or"
+        }
+      },
+      "id": "if-missed",
+      "name": "If missed inbound",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "operation": "lookup",
+        "documentId": {"__rl": true, "value": "REPLACE_ME_SHEET_ID", "mode": "id"},
+        "sheetName": {"__rl": true, "value": "patients_db", "mode": "name"},
+        "lookupColumn": "phone",
+        "lookupValue": "={{ $('Twilio status webhook').first().json.body.From }}",
+        "options": {}
+      },
+      "id": "patient-lookup",
+      "name": "Lookup patient",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [640, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "REPLACE_ME_GSHEETS", "name": "Google Sheets OAuth"}
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.cal.com/v1/availability",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "eventTypeId", "value": "REPLACE_ME_CALCOM_EVENT_ID"},
+            {"name": "dateFrom", "value": "={{ $now.toISO() }}"},
+            {"name": "dateTo", "value": "={{ $now.plus({days: 3}).toISO() }}"}
+          ]
+        },
+        "options": {}
+      },
+      "id": "fetch-slots",
+      "name": "Fetch Cal.com slots",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 300],
+      "credentials": {
+        "httpHeaderAuth": {"id": "REPLACE_ME_CALCOM", "name": "Cal.com API"}
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const slots = $input.first().json.busy ? [] : ($input.first().json.availabilities || []);\nconst now = new Date();\nconst nextTwo = slots.filter(s => new Date(s.start) > now).slice(0, 2);\nconst formatSlot = (s) => {\n  const d = new Date(s.start);\n  return d.toLocaleString('en-US', {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'});\n};\nconst patient = $('Lookup patient').first().json;\nconst from = $('Twilio status webhook').first().json.body.From;\nreturn [{\n  json: {\n    patient_name: patient.full_name || 'there',\n    patient_phone: from,\n    is_returning: !!patient.last_visit_at,\n    slot_1: nextTwo[0] ? formatSlot(nextTwo[0]) : 'tomorrow 10:00 AM',\n    slot_2: nextTwo[1] ? formatSlot(nextTwo[1]) : 'tomorrow 2:00 PM',\n    booking_link: `https://cal.com/REPLACE_ME_CALCOM_USER/REPLACE_ME_EVENT_SLUG?phone=${encodeURIComponent(from)}`\n  }\n}];"
+      },
+      "id": "compose",
+      "name": "Compose WA params",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1080, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "from": "whatsapp:REPLACE_ME_TWILIO_FROM",
+        "to": "=whatsapp:{{ $json.patient_phone }}",
+        "toWhatsapp": true,
+        "message": "=Hi {{ $json.patient_name }}, sorry we missed your call to the clinic. Two slots open in the next 3 days: {{ $json.slot_1 }} or {{ $json.slot_2 }}. Book direct here: {{ $json.booking_link }}. If urgent, reply URGENT and the front desk will call back within 30 min.",
+        "options": {"contentSid": "REPLACE_ME_WA_TEMPLATE_SID"}
+      },
+      "id": "twilio-wa",
+      "name": "Send WA recovery",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [1300, 300],
+      "credentials": {
+        "twilioApi": {"id": "REPLACE_ME_TWILIO", "name": "Twilio API"}
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://services.leadconnectorhq.com/contacts/upsert",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"locationId\": \"REPLACE_ME_GHL_LOCATION\",\n  \"phone\": \"{{ $('Compose WA params').first().json.patient_phone }}\",\n  \"firstName\": \"{{ $('Compose WA params').first().json.patient_name }}\",\n  \"tags\": [\"missed-call-recovered\", \"wa-followup-sent\"],\n  \"source\": \"clinic-missed-call-bot\"\n}",
+        "options": {}
+      },
+      "id": "ghl-upsert",
+      "name": "Upsert to GHL CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1520, 300],
+      "credentials": {
+        "httpHeaderAuth": {"id": "REPLACE_ME_GHL", "name": "GHL Bearer"}
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {"__rl": true, "value": "REPLACE_ME_SHEET_ID", "mode": "id"},
+        "sheetName": {"__rl": true, "value": "missed_call_log", "mode": "name"},
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ts": "={{ $now.toISO() }}",
+            "from_phone": "={{ $('Compose WA params').first().json.patient_phone }}",
+            "patient_name": "={{ $('Compose WA params').first().json.patient_name }}",
+            "is_returning": "={{ $('Compose WA params').first().json.is_returning }}",
+            "slot_1_offered": "={{ $('Compose WA params').first().json.slot_1 }}",
+            "slot_2_offered": "={{ $('Compose WA params').first().json.slot_2 }}",
+            "wa_sid": "={{ $('Send WA recovery').first().json.sid }}",
+            "status": "wa_sent"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheet-log",
+      "name": "Log missed call",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1740, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "REPLACE_ME_GSHEETS", "name": "Google Sheets OAuth"}
+      }
+    }
+  ],
+  "connections": {
+    "Twilio status webhook": {"main": [[{"node": "If missed inbound", "type": "main", "index": 0}]]},
+    "If missed inbound": {"main": [[{"node": "Lookup patient", "type": "main", "index": 0}], []]},
+    "Lookup patient": {"main": [[{"node": "Fetch Cal.com slots", "type": "main", "index": 0}]]},
+    "Fetch Cal.com slots": {"main": [[{"node": "Compose WA params", "type": "main", "index": 0}]]},
+    "Compose WA params": {"main": [[{"node": "Send WA recovery", "type": "main", "index": 0}]]},
+    "Send WA recovery": {"main": [[{"node": "Upsert to GHL CRM", "type": "main", "index": 0}]]},
+    "Upsert to GHL CRM": {"main": [[{"node": "Log missed call", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"},
+  "meta": {"templateId": "skynetlabs-20", "instanceId": "REPLACE_ME"},
+  "tags": [{"name": "skynetlabs-pack"}, {"name": "healthcare"}, {"name": "clinic-ops"}, {"name": "whatsapp"}]
+}

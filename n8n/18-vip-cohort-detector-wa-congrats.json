@@ -1,0 +1,186 @@
+{
+  "name": "18 - VIP Cohort Detector WA Congrats",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {"interval": [{"field": "cronExpression", "expression": "0 2 * * *"}]}
+      },
+      "id": "cron-nightly",
+      "name": "Nightly 02:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://{{ $env.SHOPIFY_STORE }}.myshopify.com/admin/api/2024-04/orders.json",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "status", "value": "any"},
+            {"name": "financial_status", "value": "paid"},
+            {"name": "created_at_min", "value": "={{ $now.minus({days: 90}).toISO() }}"},
+            {"name": "limit", "value": "250"}
+          ]
+        },
+        "options": {"pagination": {"pagination": {"paginationMode": "responseHeaderLink", "nextURL": "={{ $response.headers.link }}"}}}
+      },
+      "id": "fetch-orders",
+      "name": "Pull 90d paid orders",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 300],
+      "credentials": {
+        "httpHeaderAuth": {"id": "REPLACE_ME_SHOPIFY", "name": "Shopify Admin Token"}
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const orders = $input.first().json.orders || [];\nconst byCustomer = {};\nfor (const o of orders) {\n  if (!o.customer) continue;\n  const id = String(o.customer.id);\n  if (!byCustomer[id]) {\n    byCustomer[id] = {\n      customer_id: id,\n      name: `${o.customer.first_name || ''} ${o.customer.last_name || ''}`.trim(),\n      phone: o.customer.phone || o.shipping_address?.phone || '',\n      email: o.customer.email,\n      ltv_90d: 0,\n      order_count: 0\n    };\n  }\n  byCustomer[id].ltv_90d += parseFloat(o.total_price || 0);\n  byCustomer[id].order_count += 1;\n}\nconst ranked = Object.values(byCustomer).filter(c => c.phone).sort((a, b) => b.ltv_90d - a.ltv_90d);\nconst cutoff = Math.max(1, Math.floor(ranked.length * 0.05));\nconst topVips = ranked.slice(0, cutoff);\nreturn topVips.map(json => ({json}));"
+      },
+      "id": "rank-vips",
+      "name": "Rank top 5% LTV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=REPLACE_ME_SUPABASE_URL/rest/v1/vip_members?customer_id=eq.{{ $json.customer_id }}&select=customer_id",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "supabase-check",
+      "name": "Already a VIP?",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 300],
+      "credentials": {
+        "httpHeaderAuth": {"id": "REPLACE_ME_SUPABASE", "name": "Supabase Service Role"}
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "typeValidation": "strict"},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.length }}",
+              "rightValue": 0,
+              "operator": {"type": "number", "operation": "equal"}
+            }
+          ]
+        }
+      },
+      "id": "if-new",
+      "name": "If new VIP",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1080, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://{{ $env.SHOPIFY_STORE }}.myshopify.com/admin/api/2024-04/price_rules.json",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"price_rule\": {\n    \"title\": \"VIP-{{ $('Rank top 5% LTV').item.json.customer_id }}\",\n    \"target_type\": \"line_item\",\n    \"target_selection\": \"all\",\n    \"allocation_method\": \"across\",\n    \"value_type\": \"percentage\",\n    \"value\": \"-15.0\",\n    \"customer_selection\": \"prerequisite\",\n    \"prerequisite_customer_ids\": [{{ $('Rank top 5% LTV').item.json.customer_id }}],\n    \"starts_at\": \"{{ $now.toISO() }}\",\n    \"ends_at\": \"{{ $now.plus({days: 30}).toISO() }}\",\n    \"usage_limit\": 1\n  }\n}",
+        "options": {}
+      },
+      "id": "create-discount",
+      "name": "Create VIP discount",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1300, 300],
+      "credentials": {
+        "httpHeaderAuth": {"id": "REPLACE_ME_SHOPIFY", "name": "Shopify Admin Token"}
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "from": "whatsapp:REPLACE_ME_TWILIO_FROM",
+        "to": "=whatsapp:{{ $('Rank top 5% LTV').item.json.phone }}",
+        "toWhatsapp": true,
+        "message": "=Hey {{ $('Rank top 5% LTV').item.json.name.split(' ')[0] }}, Waseem here. You just landed in the top 5% of customers this quarter — wanted to say thank you, properly. Here's a private 15% code on the next order, good for 30 days: REPLACE_ME_VIP_DISCOUNT_PREFIX-{{ $('Rank top 5% LTV').item.json.customer_id }}. No catch. If you ever need anything — wrong size, missing item, whatever — just hit this number back.",
+        "options": {}
+      },
+      "id": "twilio-wa",
+      "name": "WA congrats",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [1520, 300],
+      "credentials": {
+        "twilioApi": {"id": "REPLACE_ME_TWILIO", "name": "Twilio API"}
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=REPLACE_ME_SUPABASE_URL/rest/v1/vip_members",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"customer_id\": \"{{ $('Rank top 5% LTV').item.json.customer_id }}\",\n  \"first_seen_at\": \"{{ $now.toISO() }}\",\n  \"ltv_90d\": {{ $('Rank top 5% LTV').item.json.ltv_90d }}\n}",
+        "options": {}
+      },
+      "id": "supabase-insert",
+      "name": "Save VIP record",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1740, 300],
+      "credentials": {
+        "httpHeaderAuth": {"id": "REPLACE_ME_SUPABASE", "name": "Supabase Service Role"}
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {"__rl": true, "value": "REPLACE_ME_SHEET_ID", "mode": "id"},
+        "sheetName": {"__rl": true, "value": "vip_log", "mode": "name"},
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ts": "={{ $now.toISO() }}",
+            "customer_id": "={{ $('Rank top 5% LTV').item.json.customer_id }}",
+            "name": "={{ $('Rank top 5% LTV').item.json.name }}",
+            "phone": "={{ $('Rank top 5% LTV').item.json.phone }}",
+            "ltv_90d": "={{ $('Rank top 5% LTV').item.json.ltv_90d }}",
+            "code": "=REPLACE_ME_VIP_DISCOUNT_PREFIX-{{ $('Rank top 5% LTV').item.json.customer_id }}",
+            "wa_sid": "={{ $('WA congrats').item.json.sid }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheet-log",
+      "name": "Log VIP",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1960, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "REPLACE_ME_GSHEETS", "name": "Google Sheets OAuth"}
+      }
+    }
+  ],
+  "connections": {
+    "Nightly 02:00": {"main": [[{"node": "Pull 90d paid orders", "type": "main", "index": 0}]]},
+    "Pull 90d paid orders": {"main": [[{"node": "Rank top 5% LTV", "type": "main", "index": 0}]]},
+    "Rank top 5% LTV": {"main": [[{"node": "Already a VIP?", "type": "main", "index": 0}]]},
+    "Already a VIP?": {"main": [[{"node": "If new VIP", "type": "main", "index": 0}]]},
+    "If new VIP": {"main": [[{"node": "Create VIP discount", "type": "main", "index": 0}], []]},
+    "Create VIP discount": {"main": [[{"node": "WA congrats", "type": "main", "index": 0}]]},
+    "WA congrats": {"main": [[{"node": "Save VIP record", "type": "main", "index": 0}]]},
+    "Save VIP record": {"main": [[{"node": "Log VIP", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"},
+  "meta": {"templateId": "skynetlabs-18", "instanceId": "REPLACE_ME"},
+  "tags": [{"name": "skynetlabs-pack"}, {"name": "ecommerce"}, {"name": "retention"}, {"name": "vip"}]
+}

@@ -1,0 +1,197 @@
+{
+  "name": "08 - YouTube transcript -> 9 assets",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "yt-repurpose",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "trigger-webhook",
+      "name": "Webhook (YouTube URL)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.supadata.ai/v1/youtube/transcript",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{ $json.body.youtube_url }}"
+            },
+            {
+              "name": "text",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fetch-transcript",
+      "name": "Fetch transcript",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME_SUPADATA",
+          "name": "Supadata API Header"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-sonnet-4-6",
+          "mode": "list"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a senior content repurposer. Brand voice: REPLACE_ME (direct, plain English, opinionated).\nTarget keywords for SEO/AEO: REPLACE_ME.\n\nVIDEO TITLE: {{ $('Webhook (YouTube URL)').item.json.body.title || 'Untitled' }}\nTRANSCRIPT:\n{{ $json.content || $json.transcript || $json.text }}\n\nProduce 9 assets, all derived from the transcript. Stay faithful to what was said. No invented stats.\n\nReturn ONLY valid JSON:\n{\n  \"blog_post\": {\n    \"title\": \"SEO-friendly title\",\n    \"meta\": \"<=160 char meta description\",\n    \"markdown\": \"800-1200 word blog post with H2s, conclusion\"\n  },\n  \"linkedin_carousel\": {\n    \"hook_slide\": \"...\",\n    \"slides\": [\"slide 2\", \"slide 3\", \"slide 4\", \"slide 5\", \"slide 6\", \"slide 7\", \"slide 8\"],\n    \"cta_slide\": \"...\"\n  },\n  \"x_thread\": [\"tweet 1 hook\", \"tweet 2\", \"tweet 3\", \"tweet 4\", \"tweet 5\", \"tweet 6\", \"tweet 7 CTA\"],\n  \"instagram_hooks\": [\"hook 1\", \"hook 2\", \"hook 3\", \"hook 4\", \"hook 5\"],\n  \"newsletter\": {\n    \"subject\": \"...\",\n    \"preheader\": \"...\",\n    \"body_markdown\": \"400-600 words\"\n  },\n  \"quote_cards\": [\"quote 1\", \"quote 2\", \"quote 3\", \"quote 4\", \"quote 5\"],\n  \"faq_schema\": [\n    {\"q\": \"...\", \"a\": \"...\"},\n    {\"q\": \"...\", \"a\": \"...\"},\n    {\"q\": \"...\", \"a\": \"...\"}\n  ],\n  \"podcast_srt_excerpt\": \"first 60 seconds as SRT-formatted captions\",\n  \"youtube_shorts_script\": \"45-second vertical hook + payoff + CTA\"\n}",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.5,
+          "maxTokens": 6000
+        }
+      },
+      "id": "claude-pack",
+      "name": "Claude - 9-asset pack",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1.2,
+      "position": [640, 300],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_ME_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.content?.[0]?.text || $input.first().json.text || '';\nconst match = raw.match(/\\{[\\s\\S]*\\}/);\nif (!match) throw new Error('No JSON in Claude reply');\nconst parsed = JSON.parse(match[0]);\nconst src = $('Webhook (YouTube URL)').first().json.body;\nreturn [{\n  json: {\n    ...parsed,\n    source_url: src.youtube_url,\n    source_title: src.title || parsed.blog_post.title,\n    generated_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "parse",
+      "name": "Parse + flatten",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "folderId": {
+          "__rl": true,
+          "value": "REPLACE_ME_GDOCS_FOLDER_ID",
+          "mode": "id"
+        },
+        "title": "=BLOG - {{ $json.blog_post.title }}",
+        "content": "=# {{ $json.blog_post.title }}\n\n_Meta: {{ $json.blog_post.meta }}_\n_Source: {{ $json.source_url }}_\n\n---\n\n{{ $json.blog_post.markdown }}"
+      },
+      "id": "gdocs-blog",
+      "name": "Google Doc - blog",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [1080, 200],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "REPLACE_ME_GDOCS",
+          "name": "Google Docs OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "value": "REPLACE_ME_NOTION_DB",
+          "mode": "id"
+        },
+        "propertiesUi": {
+          "propertyValues": [
+            { "key": "Name|title", "title": "={{ $json.source_title }}" },
+            { "key": "Source|url", "urlValue": "={{ $json.source_url }}" }
+          ]
+        },
+        "blockUi": {
+          "blockValues": [
+            { "type": "heading_2", "textContent": "LinkedIn carousel" },
+            { "type": "paragraph", "textContent": "={{ JSON.stringify($json.linkedin_carousel, null, 2) }}" },
+            { "type": "heading_2", "textContent": "X thread" },
+            { "type": "paragraph", "textContent": "={{ $json.x_thread.join('\\n\\n') }}" },
+            { "type": "heading_2", "textContent": "IG hooks" },
+            { "type": "paragraph", "textContent": "={{ $json.instagram_hooks.join('\\n') }}" },
+            { "type": "heading_2", "textContent": "Newsletter" },
+            { "type": "paragraph", "textContent": "={{ $json.newsletter.subject }}\\n\\n{{ $json.newsletter.body_markdown }}" },
+            { "type": "heading_2", "textContent": "Quote cards" },
+            { "type": "paragraph", "textContent": "={{ $json.quote_cards.join('\\n---\\n') }}" },
+            { "type": "heading_2", "textContent": "FAQ schema" },
+            { "type": "paragraph", "textContent": "={{ JSON.stringify($json.faq_schema, null, 2) }}" },
+            { "type": "heading_2", "textContent": "Shorts script" },
+            { "type": "paragraph", "textContent": "={{ $json.youtube_shorts_script }}" }
+          ]
+        }
+      },
+      "id": "notion-pack",
+      "name": "Notion - asset library",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [1080, 400],
+      "credentials": {
+        "notionApi": {
+          "id": "REPLACE_ME_NOTION",
+          "name": "Notion API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "#repurpose-out",
+        "text": "=:movie_camera: *9-asset pack ready*\n\n*Source:* {{ $('Parse + flatten').item.json.source_title }}\n{{ $('Parse + flatten').item.json.source_url }}\n\n:memo: Blog doc: {{ $('Google Doc - blog').item.json.webViewLink || $('Google Doc - blog').item.json.id }}\n:books: Notion page: {{ $json.url || $json.id }}",
+        "otherOptions": {}
+      },
+      "id": "slack-ping",
+      "name": "Slack ping",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1300, 400],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_ME_SLACK",
+          "name": "Slack OAuth"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook (YouTube URL)": { "main": [[{ "node": "Fetch transcript", "type": "main", "index": 0 }]] },
+    "Fetch transcript": { "main": [[{ "node": "Claude - 9-asset pack", "type": "main", "index": 0 }]] },
+    "Claude - 9-asset pack": { "main": [[{ "node": "Parse + flatten", "type": "main", "index": 0 }]] },
+    "Parse + flatten": {
+      "main": [[
+        { "node": "Google Doc - blog", "type": "main", "index": 0 },
+        { "node": "Notion - asset library", "type": "main", "index": 0 }
+      ]]
+    },
+    "Notion - asset library": { "main": [[{ "node": "Slack ping", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "templateId": "skynetlabs-08",
+    "instanceId": "REPLACE_ME"
+  },
+  "tags": [{"name": "skynetlabs-pack"}, {"name": "content"}, {"name": "repurpose"}]
+}

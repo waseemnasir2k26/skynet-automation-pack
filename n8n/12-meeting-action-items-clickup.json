@@ -1,0 +1,137 @@
+{
+  "name": "12 - Meeting to Action Items to ClickUp",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "meeting-recap",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "trigger-webhook",
+      "name": "Fathom / Fireflies webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "REPLACE_ME_WEBHOOK_ID"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\nconst transcript = body.transcript || body.summary?.transcript || body.meeting?.transcript || '';\nconst title = body.title || body.meeting?.title || 'Untitled meeting';\nconst recording_url = body.share_url || body.recording_url || body.meeting?.url || '';\nconst started_at = body.start_time || body.meeting?.start_time || new Date().toISOString();\nconst attendees = (body.attendees || body.meeting?.attendees || []).map(a => a.name || a.display_name || a.email).filter(Boolean);\nif (!transcript) throw new Error('No transcript in payload');\nreturn [{ json: { title, transcript, recording_url, started_at, attendees } }];"
+      },
+      "id": "normalise",
+      "name": "Normalise payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-sonnet-4-6",
+          "mode": "list"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You extract action items from meeting transcripts. Return ONLY valid JSON.\n\nMeeting: {{ $json.title }}\nAttendees: {{ $json.attendees.join(', ') }}\nStarted: {{ $json.started_at }}\n\nTranscript:\n{{ $json.transcript }}\n\nReturn:\n{\n  \"recap\": \"3-4 sentence summary of what was decided\",\n  \"tasks\": [\n    {\n      \"title\": \"verb-first task name, max 80 chars\",\n      \"owner_name\": \"first name from attendee list, or 'unassigned'\",\n      \"due\": \"YYYY-MM-DD or empty if not stated\",\n      \"priority\": \"urgent|high|normal|low\",\n      \"context\": \"one sentence why this matters\"\n    }\n  ],\n  \"open_questions\": [\"questions raised but not answered\"]\n}\n\nRules:\n- Only items that have a clear owner or implied owner. No vague 'team should consider'\n- Verbs first: 'Send', 'Draft', 'Review', 'Schedule'\n- If a date like 'by Friday' was said, resolve it relative to the meeting date",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.2,
+          "maxTokens": 1800
+        }
+      },
+      "id": "claude-extract",
+      "name": "Claude extract actions",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1.2,
+      "position": [640, 300],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_ME_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const NAME_TO_ID = {\n  'waseem': 12345001,\n  'sara': 12345002,\n  'omar': 12345003,\n  'ayesha': 12345004,\n  'naeem': 12345005\n};\nconst raw = $input.first().json.content?.[0]?.text || $input.first().json.text || '';\nconst match = raw.match(/\\{[\\s\\S]*\\}/);\nif (!match) throw new Error('No JSON');\nconst parsed = JSON.parse(match[0]);\nconst meta = $('Normalise payload').first().json;\nconst tasks = (parsed.tasks || []).map(t => ({\n  ...t,\n  clickup_user_id: NAME_TO_ID[(t.owner_name || '').toLowerCase().trim()] || null,\n  meeting_title: meta.title,\n  recording_url: meta.recording_url\n}));\nreturn [{ json: { recap: parsed.recap, open_questions: parsed.open_questions || [], tasks, meeting_title: meta.title, recording_url: meta.recording_url } }];"
+      },
+      "id": "map-owners",
+      "name": "Map owners to ClickUp IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "tasks",
+        "options": {}
+      },
+      "id": "split-tasks",
+      "name": "Split tasks",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [1080, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.clickup.com/api/v2/list/REPLACE_ME_CLICKUP_LIST_ID/task",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"name\": \"{{ $json.title }}\",\n  \"description\": \"From meeting: {{ $json.meeting_title }}\\n\\nWhy: {{ $json.context }}\\n\\nRecording: {{ $json.recording_url }}\",\n  \"assignees\": [{{ $json.clickup_user_id || 0 }}],\n  \"priority\": {{ {urgent:1, high:2, normal:3, low:4}[$json.priority] || 3 }},\n  \"due_date\": {{ $json.due ? new Date($json.due).getTime() : 'null' }}\n}",
+        "options": {}
+      },
+      "id": "clickup-create",
+      "name": "Create ClickUp task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1300, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME_CLICKUP",
+          "name": "ClickUp API Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "#meeting-recaps",
+        "text": "=:memo: *{{ $('Map owners to ClickUp IDs').first().json.meeting_title }}*\n\n{{ $('Map owners to ClickUp IDs').first().json.recap }}\n\n*Action items:* {{ $('Map owners to ClickUp IDs').first().json.tasks.length }} created in ClickUp\n*Open questions:*\n{{ $('Map owners to ClickUp IDs').first().json.open_questions.map(q => '• ' + q).join('\\n') }}\n\n<{{ $('Map owners to ClickUp IDs').first().json.recording_url }}|Recording>",
+        "otherOptions": {}
+      },
+      "id": "slack-recap",
+      "name": "Slack recap",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1520, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_ME_SLACK",
+          "name": "Slack OAuth"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Fathom / Fireflies webhook": { "main": [[{ "node": "Normalise payload", "type": "main", "index": 0 }]] },
+    "Normalise payload": { "main": [[{ "node": "Claude extract actions", "type": "main", "index": 0 }]] },
+    "Claude extract actions": { "main": [[{ "node": "Map owners to ClickUp IDs", "type": "main", "index": 0 }]] },
+    "Map owners to ClickUp IDs": { "main": [[{ "node": "Split tasks", "type": "main", "index": 0 }]] },
+    "Split tasks": { "main": [[{ "node": "Create ClickUp task", "type": "main", "index": 0 }]] },
+    "Create ClickUp task": { "main": [[{ "node": "Slack recap", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "templateId": "skynetlabs-12",
+    "instanceId": "REPLACE_ME"
+  },
+  "tags": [{"name": "skynetlabs-pack"}, {"name": "meetings"}, {"name": "clickup"}]
+}
