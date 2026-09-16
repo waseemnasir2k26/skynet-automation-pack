@@ -2,6 +2,10 @@
 
 20 production-grade n8n automations for agencies, solo founders, SaaS, and e-commerce teams. Each ships with:
 
+## Status
+
+Last reviewed: September 2026 · release v2026.09
+
 - **5-page setup PDF** in `pdfs/` — what it does, why, stack costs, prereqs, step-by-step wiring
 - **Importable n8n JSON** in `n8n/` — paste into n8n → Workflows → Import from Clipboard
 - **Social carousel HTML** in `carousels-html/` — 10-slide 1080×1350 lead-magnet templates
