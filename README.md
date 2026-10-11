@@ -4,7 +4,7 @@
 
 ## Status
 
-Last reviewed: September 2026 · release v2026.09
+Last reviewed: October 2026 · release v2026.10
 
 - **5-page setup PDF** in `pdfs/` — what it does, why, stack costs, prereqs, step-by-step wiring
 - **Importable n8n JSON** in `n8n/` — paste into n8n → Workflows → Import from Clipboard
@@ -56,9 +56,11 @@ Most workflows run in 45-90 minutes from cold start. Stack costs land between $2
 
 ## Need it wired for you?
 
-Three paths:
+Ways to work together:
 
-- **Fiverr ($297-997 per flow):** [fiverr.com/agencies/skynetjoellc](https://www.fiverr.com/agencies/skynetjoellc)
+- **Fiverr ($297-997 per flow):** https://www.fiverr.com/agencies/skynetjoellc
+- **Upwork:** https://www.upwork.com/freelancers/muhammadwaseemnasir
+- **Book a free call:** https://calendly.com/skynetlabs/schedule-a-free-consultation
 - **Free 20-min audit:** [waseem@skynetjoe.com](mailto:waseem@skynetjoe.com)
 - **Monthly retainer ($1.5K-5K/mo) — full stack, multi-workflow agency:** same email
 

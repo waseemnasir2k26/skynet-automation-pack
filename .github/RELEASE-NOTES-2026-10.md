@@ -1,0 +1,4 @@
+- skynet-automation-pack is a public, MIT-licensed free pack of 20 n8n automations, each with an importable workflow JSON, a 5-page setup PDF, a carousel and rendered PNG slides.
+- Reviewed October 2026: tree re-checked; README links (skynetjoe.com, waseemnasir.com, Fiverr agency, repo issues) returned HTTP 200. No workflow, PDF or carousel change.
+- Known gaps: workflow JSONs are a May 2026 snapshot and were not re-validated against a current n8n version; each needs credentials wired after import; no CI workflow and no package manifest.
+- Release housekeeping only: Status line, changelog and the 'Need it wired for you?' links updated to the Fiverr, Upwork and Calendly URLs.
