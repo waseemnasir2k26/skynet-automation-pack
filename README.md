@@ -1,82 +1,53 @@
-# Skynet Automation Pack — 20 free n8n workflows
+# skynet-automation-pack
 
-20 production-grade n8n automations for agencies, solo founders, SaaS, and e-commerce teams. Each ships with:
+Twenty n8n workflows for agencies, founders, SaaS and e-commerce teams, each with importable JSON, a setup PDF and a 10-slide carousel template. Lead scoring, form qualification, cold-email reply detection, AEO citation monitoring, voice-note follow-up and more.
 
-## Status
+## What is in it
 
-Last reviewed: October 2026 · release v2026.10
+- `n8n/` - 20 importable workflow files.
+- `pdfs/` - one setup PDF per workflow: what it does, stack, prerequisites, wiring steps.
+- `carousels-html/` and `carousels-png/` - a 10-slide 1080x1350 carousel per workflow, as HTML and rendered PNG.
 
-- **5-page setup PDF** in `pdfs/` — what it does, why, stack costs, prereqs, step-by-step wiring
-- **Importable n8n JSON** in `n8n/` — paste into n8n → Workflows → Import from Clipboard
-- **Social carousel HTML** in `carousels-html/` — 10-slide 1080×1350 lead-magnet templates
+| #   | Workflow                              | #   | Workflow                                 |
+| --- | ------------------------------------- | --- | ---------------------------------------- |
+| 01  | LinkedIn DM ICP scorer                | 11  | Receipt OCR to Sheets and tax            |
+| 02  | Inbound form AI qualifier             | 12  | Meeting action items to ClickUp          |
+| 03  | Cold email warm-up and reply detector | 13  | Calendly dossier (LinkedIn, X, company)  |
+| 04  | LinkedIn comment to DM trigger        | 14  | Loom auto-doc to Slack                   |
+| 05  | Voice-note follow-up (ElevenLabs)     | 15  | Async standup bot                        |
+| 06  | AEO citation monitor (4 LLMs)         | 16  | Abandoned cart to WhatsApp voice note    |
+| 07  | Competitor blog to my-angle draft     | 17  | Negative review AI reply draft           |
+| 08  | YouTube transcript to 9 assets        | 18  | VIP cohort detector to WhatsApp congrats |
+| 09  | GSC anomaly bot                       | 19  | Real estate listing to 5 platforms       |
+| 10  | FAQ to schema to WP REST inject       | 20  | Clinic missed call to WhatsApp recovery  |
 
-Built by [Waseem Nasir](https://waseemnasir.com) / [SkynetLabs](https://skynetjoe.com).
+Files are named `NN-<slug>.json` and `NN-<slug>.pdf`; browse the folders for the exact names.
 
----
+## Quickstart
 
-## The 20 automations
+1. Open the PDF for the workflow you want and read the stack table and prerequisites.
+2. In n8n: Workflows, Import from File (or paste the JSON with Import from Clipboard).
+3. Replace every `REPLACE_ME` credential marker with your own credentials in n8n.
+4. Run once manually, check the output, then activate.
 
-| # | Automation | PDF | n8n JSON |
-|---|---|---|---|
-| 01 | LinkedIn DM ICP Scorer | [pdf](pdfs/01-linkedin-dm-icp-scorer.pdf) | [json](n8n/01-linkedin-dm-icp-scorer.json) |
-| 02 | Inbound Form AI Qualifier | [pdf](pdfs/02-inbound-form-ai-qualifier.pdf) | [json](n8n/02-inbound-form-ai-qualifier.json) |
-| 03 | Cold Email Warm-up + Reply Detector | [pdf](pdfs/03-cold-email-warmup-reply-detector.pdf) | [json](n8n/03-cold-email-warmup-reply-detector.json) |
-| 04 | LinkedIn Comment → DM Auto-Trigger | [pdf](pdfs/04-linkedin-comment-dm-trigger.pdf) | [json](n8n/04-linkedin-comment-dm-trigger.json) |
-| 05 | Voice-Note Follow-up (ElevenLabs) | [pdf](pdfs/05-voice-note-followup-elevenlabs.pdf) | [json](n8n/05-voice-note-followup-elevenlabs.json) |
-| 06 | AEO Citation Monitor (4 LLMs) | [pdf](pdfs/06-aeo-citation-monitor-4llm.pdf) | [json](n8n/06-aeo-citation-monitor-4llm.json) |
-| 07 | Competitor Blog → My-Angle Draft | [pdf](pdfs/07-competitor-blog-my-angle-draft.pdf) | [json](n8n/07-competitor-blog-my-angle-draft.json) |
-| 08 | YouTube Transcript → 9 Assets | [pdf](pdfs/08-youtube-transcript-9-assets.pdf) | [json](n8n/08-youtube-transcript-9-assets.json) |
-| 09 | GSC Anomaly Bot | [pdf](pdfs/09-gsc-anomaly-bot.pdf) | [json](n8n/09-gsc-anomaly-bot.json) |
-| 10 | FAQ → Schema → WP REST Inject | [pdf](pdfs/10-faq-schema-wp-rest-inject.pdf) | [json](n8n/10-faq-schema-wp-rest-inject.json) |
-| 11 | Receipt OCR → Sheets → Tax | [pdf](pdfs/11-receipt-ocr-sheets-tax.pdf) | [json](n8n/11-receipt-ocr-sheets-tax.json) |
-| 12 | Meeting → Action Items → ClickUp | [pdf](pdfs/12-meeting-action-items-clickup.pdf) | [json](n8n/12-meeting-action-items-clickup.json) |
-| 13 | Calendly Dossier (LI + X + Company) | [pdf](pdfs/13-calendly-dossier-li-twitter-company.pdf) | [json](n8n/13-calendly-dossier-li-twitter-company.json) |
-| 14 | Loom Auto-Doc → Slack | [pdf](pdfs/14-loom-auto-doc-slack.pdf) | [json](n8n/14-loom-auto-doc-slack.json) |
-| 15 | Async Standup Bot | [pdf](pdfs/15-async-standup-bot.pdf) | [json](n8n/15-async-standup-bot.json) |
-| 16 | Abandoned Cart → WA Voice Note | [pdf](pdfs/16-abandoned-cart-wa-voice-note.pdf) | [json](n8n/16-abandoned-cart-wa-voice-note.json) |
-| 17 | Negative Review → AI Reply Draft | [pdf](pdfs/17-negative-review-ai-reply-draft.pdf) | [json](n8n/17-negative-review-ai-reply-draft.json) |
-| 18 | VIP Cohort Detector → WA Congrats | [pdf](pdfs/18-vip-cohort-detector-wa-congrats.pdf) | [json](n8n/18-vip-cohort-detector-wa-congrats.json) |
-| 19 | Real Estate Listing → 5 Platforms | [pdf](pdfs/19-real-estate-listing-5-platforms.pdf) | [json](n8n/19-real-estate-listing-5-platforms.json) |
-| 20 | Clinic Missed-Call → WA → Recovery | [pdf](pdfs/20-clinic-missed-call-wa-recovery.pdf) | [json](n8n/20-clinic-missed-call-wa-recovery.json) |
+## For you if
 
----
+You run your own n8n and want a starting point per use case rather than a blank canvas.
 
-## How to use
+## Status and limits
 
-1. Open the PDF for the automation you want.
-2. Skim the stack table + prereqs.
-3. Copy the n8n JSON from this repo (or the GitHub button on page 4 of the PDF).
-4. In your n8n instance: **Workflows → Import from Clipboard** → paste.
-5. Bind credentials marked `REPLACE_ME` in each node.
-6. Execute once manually to verify, then activate.
-
-Most workflows run in 45-90 minutes from cold start. Stack costs land between $20-150/mo.
-
----
-
-## Need it wired for you?
-
-Ways to work together:
-
-- **Fiverr ($297-997 per flow):** https://www.fiverr.com/agencies/skynetjoellc
-- **Upwork:** https://www.upwork.com/freelancers/muhammadwaseemnasir
-- **Book a free call:** https://calendly.com/skynetlabs/schedule-a-free-consultation
-- **Free 20-min audit:** [waseem@skynetjoe.com](mailto:waseem@skynetjoe.com)
-- **Monthly retainer ($1.5K-5K/mo) — full stack, multi-workflow agency:** same email
-
----
+- Starting points, not finished products. Expect to adjust prompts, mappings and credentials for your stack.
+- Several flows depend on paid third parties (LLM APIs, ElevenLabs, WhatsApp or SMS providers, a LinkedIn data provider). Those costs are yours.
+- The WhatsApp and outreach flows send messages. Check platform rules and consent requirements first; these flows have no built-in compliance layer (see `n8n-whatsapp-compliant-agent` for one).
+- Not re-tested against every n8n release. Try them on a copy first.
+- The JSON files carry `REPLACE_ME` markers and no live credentials.
 
 ## License
 
-MIT. Fork, remix, ship. Attribution appreciated but not required.
+MIT, see [LICENSE](LICENSE).
 
 ---
 
-## Stack philosophy
+Built by SkynetLabs. Contact: info@skynetjoe.com
 
-- **n8n** over Zapier/Make: self-hosted = no per-task tax, full code escape hatch.
-- **Claude / GPT-4 / Sonar / Gemini** depending on task. Most flows are LLM-agnostic.
-- **Real APIs over scrapers** where available. Unipile for LinkedIn, Twilio for SMS/WA, Shopify/Woo native.
-- **REPLACE_ME credential markers** in every JSON — no leaked tokens, ever.
-
-Each workflow has been built to import cleanly and run end-to-end on a fresh n8n. If anything breaks, [open an issue](https://github.com/waseemnasir2k26/skynet-automation-pack/issues).
+Need this wired into your business? SkynetLabs builds voice agents, n8n back offices and sites that convert → https://skynetjoe.com
